@@ -38,6 +38,18 @@ fun createOkHttp(): OkHttpClient = OkHttpClient.Builder()
     }
     .build()
 
+fun createWebSocketOkHttp(): OkHttpClient = OkHttpClient.Builder()
+    .connectTimeout(15, TimeUnit.SECONDS)
+    .readTimeout(0, TimeUnit.SECONDS)
+    .writeTimeout(30, TimeUnit.SECONDS)
+    .pingInterval(30, TimeUnit.SECONDS)
+    .apply {
+        if (BuildConfig.DEBUG) {
+            addInterceptor(HttpLoggingInterceptor().apply { level = Level.BASIC })
+        }
+    }
+    .build()
+
 fun createRetrofit(okHttp: OkHttpClient): Retrofit = Retrofit.Builder()
     .baseUrl("http://localhost/")
     .client(okHttp)

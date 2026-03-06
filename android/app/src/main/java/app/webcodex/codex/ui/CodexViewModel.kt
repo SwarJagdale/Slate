@@ -2,13 +2,16 @@ package app.webcodex.codex.ui
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.lifecycle.viewModelScope
 import app.webcodex.codex.data.CodexRepository
 import app.webcodex.codex.data.createOkHttp
 import app.webcodex.codex.data.createRetrofit
 import app.webcodex.codex.network.ApiService
 import app.webcodex.codex.network.WsEvent
-import app.webcodex.codex.network.WebSocketClient
+import app.webcodex.codex.service.ConnectionManager
+import app.webcodex.codex.service.CodexConnectionService
 import app.webcodex.codex.commands.SlashCommandHandler
 import app.webcodex.codex.storage.AppSettings
 import app.webcodex.codex.storage.CachedMessage
@@ -78,11 +81,11 @@ data class TokenUsage(val inputTokens: Int, val cachedInputTokens: Int, val outp
 data class RateLimitInfo(val usedPercent: Double, val resetsAt: Double?)
 
 class CodexViewModel(application: Application) : AndroidViewModel(application) {
+    private val app = application
     private val tokenStore = TokenStore(application)
     private val settingsStore = SettingsStore(application)
     private val sessionCacheStore = SessionCacheStore(application)
     private val okHttp = createOkHttp()
-    private val wsClient = WebSocketClient(okHttp)
     private val api: ApiService = createRetrofit(okHttp).create(ApiService::class.java)
     private val repository = CodexRepository(api, okHttp)
     private var autoConnectAttempted = false
@@ -110,7 +113,12 @@ class CodexViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
         viewModelScope.launch {
-            wsClient.events.collect { event ->
+            ConnectionManager.connectionState.collect { state ->
+                syncConnectionState(state)
+            }
+        }
+        viewModelScope.launch {
+            ConnectionManager.events.collect { event ->
                 when (event) {
                     is WsEvent.SessionReady -> onSessionReady(event)
                     is WsEvent.AppEvent -> onAppEvent(event.json)
@@ -122,8 +130,42 @@ class CodexViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private fun syncConnectionState(state: ConnectionManager.ConnectionState) {
+        when (state) {
+            is ConnectionManager.ConnectionState.Error, is ConnectionManager.ConnectionState.Disconnected -> {
+                if (state is ConnectionManager.ConnectionState.Error) {
+                    transitionToOffline(state.message)
+                } else {
+                    transitionToOffline()
+                }
+                return
+            }
+            else -> { /* continue to update */ }
+        }
+        _uiState.update { current ->
+            val (isConnected, connectionStatus, error) = when (state) {
+                is ConnectionManager.ConnectionState.Connecting, is ConnectionManager.ConnectionState.Reconnecting ->
+                    Triple(current.isConnected, "connecting", null)
+                is ConnectionManager.ConnectionState.Initializing ->
+                    Triple(true, "initializing", null)
+                is ConnectionManager.ConnectionState.Ready ->
+                    Triple(true, if (current.connectionStatus == "resuming") "resuming" else "ready", null)
+                is ConnectionManager.ConnectionState.Working ->
+                    Triple(true, "working", null)
+                else -> return@update current
+            }
+            current.copy(
+                isConnected = isConnected,
+                connectionStatus = connectionStatus,
+                error = error,
+                hasOfflineCache = current.messages.isNotEmpty() || current.hasOfflineCache,
+                preferOfflineHome = if (isConnected || current.hasOfflineCache) true else current.preferOfflineHome
+            )
+        }
+    }
+
     private fun maybeAutoConnect(settings: AppSettings) {
-        if (autoConnectAttempted || wsClient.isOpen()) return
+        if (autoConnectAttempted || ConnectionManager.isOpen) return
         autoConnectAttempted = true
 
         val savedToken = tokenStore.token?.trim().orEmpty()
@@ -145,6 +187,14 @@ class CodexViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun onSessionReady(e: WsEvent.SessionReady) {
+        val state = _uiState.value
+        ConnectionManager.setReconnectParams(
+            baseUrl = "http://${state.serverHost}:${state.serverPort}",
+            token = state.token.ifBlank { tokenStore.token ?: "" },
+            workspace = state.workspacePath,
+            sessionId = e.sessionId
+        )
+        ConnectionManager.onSessionReady(e.sessionId)
         _uiState.update {
             it.copy(
                 isConnected = true,
@@ -154,7 +204,88 @@ class CodexViewModel(application: Application) : AndroidViewModel(application) {
                 preferOfflineHome = true
             )
         }
-        initSession(e.workspaceName)
+        CodexConnectionService.start(app)
+        if (state.threadId != null) {
+            reattachSession(e.workspaceName)
+        } else {
+            initSession(e.workspaceName)
+        }
+    }
+
+    private fun reattachSession(workspaceName: String) {
+        val threadId = _uiState.value.threadId ?: run {
+            initSession(workspaceName)
+            return
+        }
+        viewModelScope.launch {
+            rpc("initialize", mapOf(
+                "clientInfo" to mapOf("name" to "slate", "title" to "Slate", "version" to "0.2.0"),
+                "capabilities" to mapOf("experimentalApi" to false)
+            )) { _ ->
+                notify("initialized", emptyMap())
+                val s = _uiState.value.settings
+                val params = mutableMapOf<String, Any>("threadId" to threadId)
+                if (s.model.isNotEmpty()) params["model"] = s.model
+                params["approvalPolicy"] = s.approvalPolicy
+                params["sandbox"] = when (s.sandbox) {
+                    "workspaceWrite" -> "workspace-write"
+                    "readOnly" -> "read-only"
+                    "dangerFullAccess" -> "danger-full-access"
+                    else -> "workspace-write"
+                }
+                rpc("thread/resume", params) { res ->
+                    val thread = (res as? Map<*, *>)?.get("thread") as? Map<*, *>
+                    val tid = thread?.get("id") as? String ?: threadId
+                    ConnectionManager.updateStatus(ConnectionManager.ConnectionState.Ready)
+                    CodexConnectionService.updateReady(app)
+                    _uiState.update {
+                        it.copy(
+                            threadId = tid,
+                            connectionStatus = "ready",
+                            workspaceName = workspaceName
+                        )
+                    }
+                    rpc("thread/read", mapOf("threadId" to tid, "includeTurns" to true)) { readRes ->
+                        val t = (readRes as? Map<*, *>)?.get("thread") as? Map<*, *>
+                        val turns = t?.get("turns") as? List<*>
+                        val msgs = mutableListOf<ChatMessage>()
+                        turns?.forEach { turn ->
+                            val items = (turn as? Map<*, *>)?.get("items") as? List<*>
+                            items?.forEach { item ->
+                                val m = item as? Map<*, *> ?: return@forEach
+                                val type = m["type"] as? String ?: return@forEach
+                                when (type) {
+                                    "userMessage" -> {
+                                        val content = (m["content"] as? List<*>)?.mapNotNull { c ->
+                                            (c as? Map<*, *>)?.takeIf { it["type"] == "text" }?.get("text") as? String
+                                        }?.joinToString("\n") ?: ""
+                                        msgs.add(ChatMessage("u-${m["id"]}", MessageType.USER, content))
+                                    }
+                                    "agentMessage" -> {
+                                        val text = m["text"] as? String ?: ""
+                                        msgs.add(ChatMessage("a-${m["id"]}", MessageType.AGENT, text))
+                                    }
+                                    "reasoning" -> {
+                                        val body = (m["content"] as? List<*>)?.joinToString("\n") { it.toString() } ?: ""
+                                        msgs.add(ChatMessage("t-${m["id"]}", MessageType.THINKING, body))
+                                    }
+                                    "commandExecution" -> {
+                                        val cmd = m["command"] as? String ?: ""
+                                        msgs.add(ChatMessage("ex-${m["id"]}", MessageType.EXEC, "", false, mapOf("command" to cmd)))
+                                    }
+                                    "fileChange" -> msgs.add(ChatMessage("f-${m["id"]}", MessageType.FILE, "", false, mapOf("item" to (m.toString()))))
+                                    "mcpToolCall" -> msgs.add(ChatMessage("m-${m["id"]}", MessageType.TOOL, m["tool"] as? String ?: ""))
+                                }
+                            }
+                        }
+                        _uiState.update { it.copy(messages = msgs) }
+                        addSystem("Reconnected")
+                    }
+                    loadModels()
+                    loadThreadList()
+                }
+            }
+        }
     }
 
     private fun initSession(workspaceName: String) {
@@ -177,6 +308,8 @@ class CodexViewModel(application: Application) : AndroidViewModel(application) {
                 rpc("thread/start", threadParams) { tr ->
                     val thread = (tr as? Map<*, *>)?.get("thread") as? Map<*, *>
                     val tid = thread?.get("id") as? String
+                    ConnectionManager.updateStatus(ConnectionManager.ConnectionState.Ready)
+                    CodexConnectionService.updateReady(app)
                     _uiState.update {
                         it.copy(
                             threadId = tid,
@@ -209,9 +342,16 @@ class CodexViewModel(application: Application) : AndroidViewModel(application) {
             "turn/started" -> {
                 val turn = params.optJSONObject("turn")
                 val turnId = turn?.optString("id")
+                ConnectionManager.updateStatus(ConnectionManager.ConnectionState.Working)
+                CodexConnectionService.updateWorking(app)
                 _uiState.update { it.copy(activeTurnId = turnId, connectionStatus = "working") }
             }
             "turn/completed" -> {
+                if (ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED).not()) {
+                    CodexConnectionService.showTurnComplete(app)
+                }
+                ConnectionManager.updateStatus(ConnectionManager.ConnectionState.Ready)
+                CodexConnectionService.updateReady(app)
                 _uiState.update { it.copy(activeTurnId = null, connectionStatus = "ready") }
                 processQueue()
             }
@@ -283,18 +423,12 @@ class CodexViewModel(application: Application) : AndroidViewModel(application) {
             settingsStore.updateSettings { it.copy(serverHost = host, serverPort = port) }
         }
         _uiState.update { it.copy(connectionStatus = "connecting", error = null, preferOfflineHome = true) }
-        wsClient.connect(
-            baseUrl = baseUrl,
-            token = token,
-            workspace = workspace,
-            onOpen = { _uiState.update { it.copy(error = null) } },
-            onClose = { code, reason -> transitionToOffline(if (code != 1000) "Disconnected: $reason" else null) },
-            onFailure = { t -> transitionToOffline(t.message ?: "Connection failed") }
-        )
+        ConnectionManager.connect(baseUrl = baseUrl, token = token, workspace = workspace, sessionId = null)
     }
 
     fun disconnect() {
-        wsClient.close()
+        CodexConnectionService.stop(app)
+        ConnectionManager.disconnect()
         transitionToOffline()
     }
 
@@ -642,7 +776,7 @@ class CodexViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun rpc(method: String, params: Map<String, Any>, callback: (Any?) -> Unit) {
-        wsClient.sendRpc(method, params, { result ->
+        ConnectionManager.sendRpc(method, params, { result ->
             viewModelScope.launch {
                 callback(result)
             }
@@ -652,12 +786,12 @@ class CodexViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun notify(method: String, params: Map<String, Any>) {
-        wsClient.sendNotify(method, params)
+        ConnectionManager.sendNotify(method, params)
     }
 
     fun sendPermission(requestId: String, decision: String) {
         if (!_uiState.value.isConnected) return
-        wsClient.sendPermission(requestId, decision)
+        ConnectionManager.sendPermission(requestId, decision)
     }
 
     private fun addUserMessage(text: String) {

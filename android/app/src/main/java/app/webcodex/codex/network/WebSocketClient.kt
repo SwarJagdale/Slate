@@ -34,6 +34,7 @@ class WebSocketClient(
         baseUrl: String,
         token: String,
         workspace: String? = null,
+        sessionId: String? = null,
         onOpen: () -> Unit,
         onClose: (Int, String?) -> Unit,
         onFailure: (Throwable) -> Unit
@@ -44,9 +45,14 @@ class WebSocketClient(
             append(url)
             if (!url.endsWith("/")) append("/")
             append("ws")
+            val params = mutableListOf<String>()
             if (!workspace.isNullOrBlank()) {
-                append("?workspace=").append(java.net.URLEncoder.encode(workspace, "UTF-8"))
+                params.add("workspace=${java.net.URLEncoder.encode(workspace, "UTF-8")}")
             }
+            if (!sessionId.isNullOrBlank()) {
+                params.add("sessionId=${java.net.URLEncoder.encode(sessionId, "UTF-8")}")
+            }
+            if (params.isNotEmpty()) append("?").append(params.joinToString("&"))
         }
 
         val request = Request.Builder()
@@ -153,6 +159,10 @@ class WebSocketClient(
     fun close() {
         webSocket?.send(JSONObject().apply { put("type", "close") }.toString())
         webSocket?.close(1000, "Client close")
+        webSocket = null
+    }
+
+    fun clearSocketReference() {
         webSocket = null
     }
 

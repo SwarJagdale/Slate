@@ -16,6 +16,7 @@ const AUTH_TOKEN = process.env.WEBAPP_AUTH_TOKEN || "";
 const MAX_MSG_BYTES = Number(process.env.MAX_MSG_BYTES || 256_000);
 const MAX_QUEUE = Number(process.env.MAX_QUEUE || 200);
 const KILL_IDLE_MS = Number(process.env.KILL_IDLE_MS || 10 * 60 * 1000);
+const SESSION_GRACE_MS = Number(process.env.SESSION_GRACE_MS || 5 * 60 * 1000);
 
 const ENABLE_SESSION_LOG =
   process.env.SESSION_LOG === "1" ||
@@ -206,6 +207,16 @@ server.on("upgrade", (req, socket, head) => {
     return;
   }
 
+  const reattachSessionId = url.searchParams.get("sessionId") || "";
+  if (reattachSessionId) {
+    const existing = sessions.get(reattachSessionId);
+    if (existing && existing.canAttach()) {
+      log(`WS upgrade accepted (reattach session ${reattachSessionId})`);
+      wss.handleUpgrade(req, socket, head, (ws) => existing.attach(ws));
+      return;
+    }
+  }
+
   log(`WS upgrade accepted (workspace: ${sessionWorkspace})`);
   wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req, sessionWorkspace));
 });
@@ -235,6 +246,8 @@ function createSession(ws, workspace) {
   const outQueue = [];
   let closed = false;
   let lastActivity = Date.now();
+  let currentWs = ws;
+  let graceTimer = null;
 
   const idleTimer = setInterval(() => {
     if (Date.now() - lastActivity > KILL_IDLE_MS) {
@@ -244,9 +257,12 @@ function createSession(ws, workspace) {
 
   function sendToClient(evt) {
     if (closed) return;
+    if (!currentWs || currentWs.readyState !== currentWs.OPEN) return;
     const payload = JSON.stringify(evt);
     if (Buffer.byteLength(payload, "utf8") > MAX_MSG_BYTES) return;
-    if (ws.readyState === ws.OPEN) ws.send(payload);
+    try {
+      currentWs.send(payload);
+    } catch { }
   }
 
   function flushQueue() {
@@ -285,6 +301,10 @@ function createSession(ws, workspace) {
     closed = true;
     log(`Session ${id} terminated: ${reason}`);
     clearInterval(idleTimer);
+    if (graceTimer) {
+      clearTimeout(graceTimer);
+      graceTimer = null;
+    }
     try {
       child.kill("SIGTERM");
       setTimeout(() => {
@@ -296,8 +316,81 @@ function createSession(ws, workspace) {
     sessions.delete(id);
     sendToClient({ type: "session_closed", reason });
     try {
-      ws.close();
+      if (currentWs) currentWs.close();
     } catch { }
+    currentWs = null;
+  }
+
+  function detach(reason) {
+    if (closed) return;
+    log(`Session ${id} detached: ${reason} (grace ${SESSION_GRACE_MS}ms)`);
+    currentWs = null;
+    if (graceTimer) clearTimeout(graceTimer);
+    graceTimer = setTimeout(() => {
+      graceTimer = null;
+      terminate("grace_timeout");
+    }, SESSION_GRACE_MS);
+  }
+
+  function attach(ws) {
+    if (closed) return;
+    if (graceTimer) {
+      clearTimeout(graceTimer);
+      graceTimer = null;
+    }
+    currentWs = ws;
+    log(`Session ${id} reattached`);
+    sendToClient({
+      type: "session_ready",
+      sessionId: id,
+      workspace: hashWorkspaceRoot(workspace),
+      workspaceName: path.basename(workspace),
+    });
+    ws.on("message", onMessage);
+    ws.on("close", onClose);
+    ws.on("error", onError);
+  }
+
+  function onMessage(data) {
+    if (typeof data !== "string" && !(data instanceof Buffer)) return;
+    const text = data.toString("utf8");
+    if (Buffer.byteLength(text, "utf8") > MAX_MSG_BYTES) {
+      try {
+        if (currentWs && currentWs.readyState === currentWs.OPEN) currentWs.send(JSON.stringify({ type: "error", error: "client_message_too_large" }));
+      } catch { }
+      return;
+    }
+    let msg;
+    try {
+      msg = JSON.parse(text);
+    } catch {
+      return;
+    }
+    if (!isAllowedClientMessage(msg)) return;
+    if (msg.type === "close") {
+      terminate("client_close");
+      return;
+    }
+    if (msg.type === "rpc") {
+      sendToAppServer(msg.rpc);
+      return;
+    }
+    if (msg.type === "permission") {
+      sendToAppServer(msg.response);
+      return;
+    }
+  }
+
+  function onClose() {
+    detach("ws_closed");
+  }
+
+  function onError() {
+    detach("ws_error");
+  }
+
+  function canAttach() {
+    return !closed && !currentWs;
   }
 
   child.stdout.on("data", (chunk) => {
@@ -335,7 +428,14 @@ function createSession(ws, workspace) {
     terminate(`appserver_exit:${code ?? ""}:${signal ?? ""}`.replaceAll("::", ":"));
   });
 
-  sessions.set(id, { id, sendToAppServer, terminate });
+  const session = {
+    id,
+    sendToAppServer,
+    terminate,
+    attach,
+    canAttach,
+  };
+  sessions.set(id, session);
   log(`Session ${id} created workspace=${workspace} (active: ${sessions.size})`);
   sendToClient({
     type: "session_ready",
@@ -343,7 +443,10 @@ function createSession(ws, workspace) {
     workspace: hashWorkspaceRoot(workspace),
     workspaceName: path.basename(workspace),
   });
-  return sessions.get(id);
+  ws.on("message", onMessage);
+  ws.on("close", onClose);
+  ws.on("error", onError);
+  return session;
 }
 
 function isAllowedClientMessage(msg) {
@@ -356,50 +459,5 @@ function isAllowedClientMessage(msg) {
 }
 
 wss.on("connection", (ws, req, sessionWorkspace) => {
-  const session = createSession(ws, sessionWorkspace || WORKSPACE_ROOT);
-
-  ws.on("message", (data) => {
-    if (typeof data !== "string" && !(data instanceof Buffer)) return;
-    const text = data.toString("utf8");
-    if (Buffer.byteLength(text, "utf8") > MAX_MSG_BYTES) {
-      try {
-        ws.send(JSON.stringify({ type: "error", error: "client_message_too_large" }));
-      } catch { }
-      return;
-    }
-    let msg;
-    try {
-      msg = JSON.parse(text);
-    } catch {
-      return;
-    }
-    if (!isAllowedClientMessage(msg)) return;
-
-    if (msg.type === "close") {
-      session.terminate("client_close");
-      return;
-    }
-
-    if (msg.type === "rpc") {
-      session.sendToAppServer(msg.rpc);
-      return;
-    }
-
-    if (msg.type === "permission") {
-      session.sendToAppServer(msg.response);
-      return;
-    }
-  });
-
-  ws.on("close", () => {
-    try {
-      session.terminate("ws_closed");
-    } catch { }
-  });
-
-  ws.on("error", () => {
-    try {
-      session.terminate("ws_error");
-    } catch { }
-  });
+  createSession(ws, sessionWorkspace || WORKSPACE_ROOT);
 });
