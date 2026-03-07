@@ -64,9 +64,23 @@ Then open `http://localhost:3000`.
 
 ## Android
 
-There is also a Kotlin/Compose Android client in `android/`. Point it at your server, enter the same auth token, and connect. For emulator use, `10.0.2.2:3000` hits the host machine.
+There is also a Kotlin/Compose Android client in `android/`. Install the APK or build with `./gradlew assembleDebug`. Point it at your server, enter the same auth token, and connect. For emulator use, `10.0.2.2:3000` hits the host machine.
 
-More details are in [android/README.md](android/README.md).
+### Gestures
+
+| Gesture | Action |
+|---|---|
+| Two-finger swipe **left** | Switch to next active session |
+| Two-finger swipe **right** | Switch to previous active session |
+| Two-finger swipe **up** | Open Active Sessions overlay (grid of all open sessions) |
+| Two-finger swipe **down** (on overlay) | Dismiss the overlay |
+| Single-finger left-edge swipe | Open History drawer |
+
+Session switching is interactive — the chat slides with your fingers and springs back if you don't cross the threshold (~35% of screen width), or commits and switches if you do.
+
+### Background persistence
+
+A foreground service keeps the WebSocket connection alive when the app is backgrounded. A persistent notification shows connection status and updates when the agent is working. A separate notification fires when a turn completes.
 
 ## Notes
 
