@@ -437,7 +437,7 @@ fun ChatScreen(
                             modifier = Modifier.size(17.dp)
                         )
                         Text(
-                            "Slate",
+                            "Cortex",
                             style = MaterialTheme.typography.titleMedium,
                             color = c.accent
                         )
@@ -675,7 +675,7 @@ fun ChatScreen(
                     enabled = !isOfflineReadOnly,
                     placeholder = {
                         Text(
-	                            if (isOfflineReadOnly) "Offline cache is read-only" else "Message Slate… (/ for commands)",
+	                            if (isOfflineReadOnly) "Offline cache is read-only" else "Message Cortex… (/ for commands)",
                             color = c.muted,
                             style = MaterialTheme.typography.bodyMedium
                         )
@@ -831,7 +831,7 @@ private fun WelcomeSection(
         )
         Spacer(Modifier.height(spacing.small))
         Text(
-	            "Ask anything about your codebase, or let Slate make changes for you.",
+	            "Ask anything about your codebase, or let Cortex make changes for you.",
             style = MaterialTheme.typography.bodyMedium,
             color = c.text2
         )
@@ -947,7 +947,7 @@ fun MessageRow(
                         modifier = Modifier.size(12.dp)
                     )
                     Text(
-                        "Slate" + if (msg.isStreaming) " ●" else "",
+                        "Cortex" + if (msg.isStreaming) " ●" else "",
                         style = MaterialTheme.typography.labelSmall,
                         color = c.accent
                     )

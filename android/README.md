@@ -1,6 +1,6 @@
-# Slate Android Client
+# Cortex Android Client
 
-Lightweight Android Kotlin clone of the web Slate client. Connects remotely to the Node.js `server.js` and provides full functional parity with the HTML client.
+Lightweight Android Kotlin clone of the web Cortex client. Connects remotely to the Node.js `server.js` and provides full functional parity with the HTML client.
 
 ## Features
 
@@ -26,7 +26,7 @@ Lightweight Android Kotlin clone of the web Slate client. Connects remotely to t
 ## Setup
 
 1. Copy `local.properties.example` to `local.properties` and set `sdk.dir` to your Android SDK path.
-2. Ensure the Slate server is running (`npm start` in the project root).
+2. Ensure the Cortex server is running (`npm start` in the project root).
 3. For emulator: use host `10.0.2.2` and port `3000` to reach host machine's localhost.
 4. For physical device: use your machine's LAN IP and port `3000`.
 5. Debug builds allow cleartext HTTP; for release, prefer HTTPS/WSS.

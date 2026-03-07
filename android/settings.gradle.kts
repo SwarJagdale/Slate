@@ -13,5 +13,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "Slate"
+rootProject.name = "Cortex"
 include(":app")

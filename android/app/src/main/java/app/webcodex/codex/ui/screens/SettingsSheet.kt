@@ -100,7 +100,7 @@ fun SettingsSheet(
                     "untrusted" to "Unless Trusted",
                     "never" to "Full Auto"
                 ),
-                supportingText = "Controls when Slate asks for approval"
+                supportingText = "Controls when Cortex asks for approval"
             ) {
                 approval = it; viewModel.updateSettings { s -> s.copy(approvalPolicy = it) }
             }

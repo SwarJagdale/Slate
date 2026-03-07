@@ -219,7 +219,7 @@ class CodexViewModel(application: Application) : AndroidViewModel(application) {
         }
         viewModelScope.launch {
             rpc("initialize", mapOf(
-                "clientInfo" to mapOf("name" to "slate", "title" to "Slate", "version" to "0.2.0"),
+                "clientInfo" to mapOf("name" to "cortex", "title" to "Cortex", "version" to "0.2.0"),
                 "capabilities" to mapOf("experimentalApi" to false)
             )) { _ ->
                 notify("initialized", emptyMap())
@@ -291,7 +291,7 @@ class CodexViewModel(application: Application) : AndroidViewModel(application) {
     private fun initSession(workspaceName: String) {
         viewModelScope.launch {
             rpc("initialize", mapOf(
-                "clientInfo" to mapOf("name" to "slate", "title" to "Slate", "version" to "0.2.0"),
+                "clientInfo" to mapOf("name" to "cortex", "title" to "Cortex", "version" to "0.2.0"),
                 "capabilities" to mapOf("experimentalApi" to false)
             )) { result ->
                 notify("initialized", emptyMap())
@@ -322,7 +322,7 @@ class CodexViewModel(application: Application) : AndroidViewModel(application) {
                             rateLimits = emptyMap()
                         )
                     }
-                    addSystem("Slate · $workspaceName")
+                    addSystem("Cortex · $workspaceName")
                     loadModels()
                     loadThreadList()
                 }

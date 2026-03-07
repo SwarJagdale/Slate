@@ -1,6 +1,6 @@
-# Slate
+# Cortex
 
-Slate is a small remote UI for `codex app-server`.
+Cortex is a small remote UI for `codex app-server`.
 
 I use it to drive Codex from a browser or Android device until Codex has first-party remote control.
 

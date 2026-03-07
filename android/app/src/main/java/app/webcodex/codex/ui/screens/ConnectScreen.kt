@@ -63,7 +63,7 @@ fun ConnectScreen(
         verticalArrangement = Arrangement.Center
     ) {
         Text(
-            "Slate",
+            "Cortex",
             style = MaterialTheme.typography.headlineLarge,
             color = MaterialTheme.colorScheme.primary
         )

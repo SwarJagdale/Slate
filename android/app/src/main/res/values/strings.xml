@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Slate</string>
-    <string name="notification_channel_name">Slate Connection</string>
-    <string name="notification_channel_description">Keeps your Slate session active in the background</string>
-    <string name="notification_connected_title">Slate connected</string>
+    <string name="app_name">Cortex</string>
+    <string name="notification_channel_name">Cortex Connection</string>
+    <string name="notification_channel_description">Keeps your Cortex session active in the background</string>
+    <string name="notification_connected_title">Cortex connected</string>
     <string name="notification_connected_text">Session active in background</string>
-    <string name="notification_working_title">Slate working</string>
+    <string name="notification_working_title">Cortex working</string>
     <string name="notification_working_text">Turn in progress</string>
-    <string name="notification_turn_complete_title">Slate</string>
+    <string name="notification_turn_complete_title">Cortex</string>
     <string name="notification_turn_complete_text">Turn completed</string>
 </resources>
