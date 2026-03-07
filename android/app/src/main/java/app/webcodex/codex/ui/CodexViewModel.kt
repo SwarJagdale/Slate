@@ -21,6 +21,7 @@ import app.webcodex.codex.storage.CachedWorkspaceOption
 import app.webcodex.codex.storage.SessionCacheStore
 import app.webcodex.codex.storage.SettingsStore
 import app.webcodex.codex.storage.TokenStore
+import app.webcodex.codex.storage.CachedActiveSession
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -31,6 +32,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import org.json.JSONObject
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.snapshotFlow
 
 data class ChatMessage(
     val id: String,
@@ -71,7 +74,8 @@ data class CodexUiState(
     val historySearchQuery: String = "",
     val itemTexts: Map<String, String> = emptyMap(),
     val hasOfflineCache: Boolean = false,
-    val preferOfflineHome: Boolean = false
+    val preferOfflineHome: Boolean = false,
+    val showActiveSessionsOverlay: Boolean = false
 )
 
 data class ThreadSummary(val id: String, val preview: String, val cwd: String?, val updatedAt: Long)
@@ -79,6 +83,15 @@ data class WorkspaceOption(val name: String, val path: String)
 data class ModelOption(val value: String, val label: String)
 data class TokenUsage(val inputTokens: Int, val cachedInputTokens: Int, val outputTokens: Int, val reasoningOutputTokens: Int)
 data class RateLimitInfo(val usedPercent: Double, val resetsAt: Double?)
+
+data class ActiveSession(
+    val threadId: String,
+    val preview: String,
+    val workspacePath: String?,
+    val workspaceName: String?,
+    val turnRunning: Boolean = false,
+    val lastActivityAt: Long = System.currentTimeMillis()
+)
 
 class CodexViewModel(application: Application) : AndroidViewModel(application) {
     private val app = application
@@ -93,6 +106,9 @@ class CodexViewModel(application: Application) : AndroidViewModel(application) {
     private val _uiState = MutableStateFlow(CodexUiState())
     val uiState: StateFlow<CodexUiState> = _uiState.asStateFlow()
 
+    val activeSessions = mutableStateMapOf<String, ActiveSession>()
+    val sessionMessageCache = mutableMapOf<String, List<ChatMessage>>()
+
     init {
         viewModelScope.launch {
             sessionCacheStore.read()?.let(::restoreCachedSession)
@@ -104,6 +120,34 @@ class CodexViewModel(application: Application) : AndroidViewModel(application) {
                     if (snapshot != null) {
                         sessionCacheStore.write(snapshot)
                     }
+                }
+        }
+        // Restore and auto-save active sessions
+        viewModelScope.launch {
+            sessionCacheStore.readActiveSessions().forEach { cached ->
+                activeSessions[cached.threadId] = ActiveSession(
+                    threadId = cached.threadId,
+                    preview = cached.preview,
+                    workspacePath = cached.workspacePath,
+                    workspaceName = cached.workspaceName,
+                    turnRunning = false, // never restore as running
+                    lastActivityAt = cached.lastActivityAt
+                )
+            }
+            snapshotFlow { activeSessions.toMap() }
+                .debounce(1000)
+                .distinctUntilChanged()
+                .collect { map ->
+                    sessionCacheStore.writeActiveSessions(map.values.map { s ->
+                        CachedActiveSession(
+                            threadId = s.threadId,
+                            preview = s.preview,
+                            workspacePath = s.workspacePath,
+                            workspaceName = s.workspaceName,
+                            turnRunning = s.turnRunning,
+                            lastActivityAt = s.lastActivityAt
+                        )
+                    })
                 }
         }
         viewModelScope.launch {
@@ -245,6 +289,7 @@ class CodexViewModel(application: Application) : AndroidViewModel(application) {
                             workspaceName = workspaceName
                         )
                     }
+                    upsertActiveSession(tid, "Reconnected", _uiState.value.workspacePath, workspaceName)
                     rpc("thread/read", mapOf("threadId" to tid, "includeTurns" to true)) { readRes ->
                         val t = (readRes as? Map<*, *>)?.get("thread") as? Map<*, *>
                         val turns = t?.get("turns") as? List<*>
@@ -322,6 +367,7 @@ class CodexViewModel(application: Application) : AndroidViewModel(application) {
                             rateLimits = emptyMap()
                         )
                     }
+                    if (tid != null) upsertActiveSession(tid, "", _uiState.value.workspacePath, workspaceName)
                     addSystem("Cortex · $workspaceName")
                     loadModels()
                     loadThreadList()
@@ -332,34 +378,53 @@ class CodexViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun onAppEvent(json: JSONObject) {
         if (json.has("method") && json.has("id")) {
-            // Permission request
+            // Permission request — only show for current thread
             addPermissionCard(json.getString("id"), json.getString("method"), json.optJSONObject("params") ?: JSONObject())
             return
         }
         val method = json.optString("method", "")
         val params = json.optJSONObject("params") ?: JSONObject()
+        val eventThreadId = params.optString("threadId", "").takeIf { it.isNotEmpty() }
+        val currentThreadId = _uiState.value.threadId
+        val isCurrentThread = eventThreadId == null || eventThreadId == currentThreadId
+
         when (method) {
             "turn/started" -> {
                 val turn = params.optJSONObject("turn")
                 val turnId = turn?.optString("id")
-                ConnectionManager.updateStatus(ConnectionManager.ConnectionState.Working)
-                CodexConnectionService.updateWorking(app)
-                _uiState.update { it.copy(activeTurnId = turnId, connectionStatus = "working") }
+                // Update active session metadata for any thread
+                if (eventThreadId != null) markSessionRunning(eventThreadId)
+                // Only update global UI state for current thread
+                if (isCurrentThread) {
+                    ConnectionManager.updateStatus(ConnectionManager.ConnectionState.Working)
+                    CodexConnectionService.updateWorking(app)
+                    _uiState.update { it.copy(activeTurnId = turnId, connectionStatus = "working") }
+                }
             }
             "turn/completed" -> {
                 if (ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED).not()) {
                     CodexConnectionService.showTurnComplete(app)
                 }
-                ConnectionManager.updateStatus(ConnectionManager.ConnectionState.Ready)
-                CodexConnectionService.updateReady(app)
-                _uiState.update { it.copy(activeTurnId = null, connectionStatus = "ready") }
-                processQueue()
+                // Update active session metadata for any thread
+                if (eventThreadId != null) markSessionIdle(eventThreadId)
+                // Only update global UI state for current thread
+                if (isCurrentThread) {
+                    ConnectionManager.updateStatus(ConnectionManager.ConnectionState.Ready)
+                    CodexConnectionService.updateReady(app)
+                    _uiState.update { it.copy(activeTurnId = null, connectionStatus = "ready") }
+                    processQueue()
+                }
             }
             "error" -> {
-                addError(params.optJSONObject("error")?.optString("message") ?: "Unknown error")
-                _uiState.update { it.copy(activeTurnId = null, connectionStatus = "error") }
+                if (eventThreadId != null) markSessionIdle(eventThreadId)
+                if (isCurrentThread) {
+                    addError(params.optJSONObject("error")?.optString("message") ?: "Unknown error")
+                    _uiState.update { it.copy(activeTurnId = null, connectionStatus = "error") }
+                }
             }
             "item/started" -> {
+                if (eventThreadId != null) updateSessionActivity(eventThreadId)
+                if (!isCurrentThread) return // Transcript guard
                 val item = params.optJSONObject("item") ?: return
                 val type = item.optString("type")
                 val id = item.optString("id")
@@ -372,6 +437,8 @@ class CodexViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
             "item/completed" -> {
+                if (eventThreadId != null) updateSessionActivity(eventThreadId)
+                if (!isCurrentThread) return // Transcript guard
                 val item = params.optJSONObject("item") ?: return
                 val type = item.optString("type")
                 val id = item.optString("id")
@@ -382,10 +449,23 @@ class CodexViewModel(application: Application) : AndroidViewModel(application) {
                     "mcpToolCall" -> finalizeMcpTool(id, item)
                 }
             }
-            "item/agentMessage/delta" -> addAgentDelta(params.optString("itemId"), params.optString("delta", ""))
-            "item/reasoning/textDelta", "item/reasoning/summaryTextDelta" -> addThinkingDelta(params.optString("itemId"), params.optString("delta", ""))
-            "item/commandExecution/outputDelta" -> appendExecOutput(params.optString("itemId"), params.optString("delta", ""))
+            "item/agentMessage/delta" -> {
+                if (eventThreadId != null) updateSessionActivity(eventThreadId)
+                if (!isCurrentThread) return
+                addAgentDelta(params.optString("itemId"), params.optString("delta", ""))
+            }
+            "item/reasoning/textDelta", "item/reasoning/summaryTextDelta" -> {
+                if (eventThreadId != null) updateSessionActivity(eventThreadId)
+                if (!isCurrentThread) return
+                addThinkingDelta(params.optString("itemId"), params.optString("delta", ""))
+            }
+            "item/commandExecution/outputDelta" -> {
+                if (eventThreadId != null) updateSessionActivity(eventThreadId)
+                if (!isCurrentThread) return
+                appendExecOutput(params.optString("itemId"), params.optString("delta", ""))
+            }
             "thread/tokenUsage/updated" -> {
+                if (!isCurrentThread) return
                 val usage = params.optJSONObject("tokenUsage")?.optJSONObject("last")
                 if (usage != null) {
                     _uiState.update {
@@ -472,6 +552,14 @@ class CodexViewModel(application: Application) : AndroidViewModel(application) {
             return true
         }
         addUserMessage(text)
+        // Update active session preview with first message if preview is empty
+        val tid = state.threadId
+        if (tid != null) {
+            val session = activeSessions[tid]
+            if (session != null && session.preview.isEmpty()) {
+                activeSessions[tid] = session.copy(preview = text.take(80), lastActivityAt = System.currentTimeMillis())
+            }
+        }
         dispatchTurn(text)
         return true
     }
@@ -670,6 +758,7 @@ class CodexViewModel(application: Application) : AndroidViewModel(application) {
                     showHistory = false
                 )
             }
+            if (tid != null) upsertActiveSession(tid, "", state.workspacePath, state.workspaceName)
             addSystem("New chat started")
             loadThreadList()
         }
@@ -678,11 +767,21 @@ class CodexViewModel(application: Application) : AndroidViewModel(application) {
     fun resumeThread(targetId: String) {
         val state = _uiState.value
         if (!state.isConnected || targetId == state.threadId) return
+        // Save current thread's messages to cache before switching
+        val oldThreadId = state.threadId
+        if (oldThreadId != null && state.messages.isNotEmpty()) {
+            sessionMessageCache[oldThreadId] = state.messages
+        }
+
+        // Instantly load cached messages for target (if available)
+        val cachedMsgs = sessionMessageCache[targetId]
         _uiState.update {
             it.copy(
+                threadId = targetId,
+                messages = cachedMsgs ?: emptyList(),
                 pendingQueue = emptyList(),
                 itemTexts = emptyMap(),
-                connectionStatus = "resuming"
+                connectionStatus = if (cachedMsgs != null) "ready" else "resuming"
             )
         }
         val s = state.settings
@@ -699,6 +798,7 @@ class CodexViewModel(application: Application) : AndroidViewModel(application) {
             val thread = (res as? Map<*, *>)?.get("thread") as? Map<*, *>
             val tid = thread?.get("id") as? String ?: targetId
             _uiState.update { it.copy(threadId = tid) }
+            upsertActiveSession(tid, "", _uiState.value.workspacePath, _uiState.value.workspaceName)
             rpc("thread/read", mapOf("threadId" to tid, "includeTurns" to true)) { readRes ->
                 val t = (readRes as? Map<*, *>)?.get("thread") as? Map<*, *>
                 val turns = t?.get("turns") as? List<*>
@@ -733,6 +833,8 @@ class CodexViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
                 _uiState.update { it.copy(messages = msgs, connectionStatus = "ready") }
+                // Update cache with fresh data
+                sessionMessageCache[tid] = msgs
                 addSystem("Resumed thread")
             }
             loadThreadList()
@@ -961,6 +1063,16 @@ class CodexViewModel(application: Application) : AndroidViewModel(application) {
                 )
             }
             _uiState.update { it.copy(threadList = list) }
+            // Refresh active session metadata from thread list
+            for ((sessionId, session) in activeSessions) {
+                val thread = list.find { it.id == sessionId }
+                if (thread != null) {
+                    activeSessions[sessionId] = session.copy(
+                        preview = thread.preview.ifEmpty { session.preview },
+                        workspacePath = thread.cwd ?: session.workspacePath
+                    )
+                }
+            }
         }
     }
 
@@ -981,8 +1093,10 @@ class CodexViewModel(application: Application) : AndroidViewModel(application) {
     fun clearError() = _uiState.update { it.copy(error = null) }
     fun toggleSettings() = _uiState.update { it.copy(showSettings = !it.showSettings) }
     fun toggleHistory() = _uiState.update { it.copy(showHistory = !it.showHistory) }
+    fun setShowHistory(show: Boolean) = _uiState.update { it.copy(showHistory = show) }
     fun openNewChatModal() = _uiState.update { it.copy(showNewChatModal = true) }
     fun dismissNewChatModal() = _uiState.update { it.copy(showNewChatModal = false) }
+    fun setShowActiveSessionsOverlay(show: Boolean) = _uiState.update { it.copy(showActiveSessionsOverlay = show) }
     fun setHistoryIncludeArchived(include: Boolean) {
         _uiState.update { it.copy(historyIncludeArchived = include) }
         loadThreadList()
@@ -1080,4 +1194,51 @@ class CodexViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun String.toMessageType(): MessageType =
         runCatching { MessageType.valueOf(this) }.getOrDefault(MessageType.SYSTEM)
+
+    // ═══════════════════════════════════════════════════════════════
+    // Active session helpers
+    // ═══════════════════════════════════════════════════════════════
+
+    fun upsertActiveSession(threadId: String, preview: String, workspacePath: String?, workspaceName: String?) {
+        val existing = activeSessions[threadId]
+        activeSessions[threadId] = (existing ?: ActiveSession(threadId = threadId, preview = "", workspacePath = null, workspaceName = null)).copy(
+            preview = preview.ifEmpty { existing?.preview ?: "" },
+            workspacePath = workspacePath ?: existing?.workspacePath,
+            workspaceName = workspaceName ?: existing?.workspaceName,
+            lastActivityAt = System.currentTimeMillis()
+        )
+    }
+
+    private fun markSessionRunning(threadId: String) {
+        val session = activeSessions[threadId] ?: return
+        activeSessions[threadId] = session.copy(turnRunning = true, lastActivityAt = System.currentTimeMillis())
+    }
+
+    private fun markSessionIdle(threadId: String) {
+        val session = activeSessions[threadId] ?: return
+        activeSessions[threadId] = session.copy(turnRunning = false, lastActivityAt = System.currentTimeMillis())
+    }
+
+    private fun updateSessionActivity(threadId: String) {
+        val session = activeSessions[threadId] ?: return
+        activeSessions[threadId] = session.copy(lastActivityAt = System.currentTimeMillis())
+    }
+
+    fun removeActiveSession(threadId: String) {
+        activeSessions.remove(threadId)
+    }
+
+    fun sortedActiveSessions(): List<ActiveSession> {
+        return activeSessions.values.sortedByDescending { it.lastActivityAt }
+    }
+
+    fun cycleActiveSession(forward: Boolean): String? {
+        val sorted = sortedActiveSessions()
+        if (sorted.size < 2) return null
+        val currentId = _uiState.value.threadId ?: return null
+        val idx = sorted.indexOfFirst { it.threadId == currentId }
+        if (idx < 0) return sorted.first().threadId
+        val nextIdx = if (forward) (idx + 1) % sorted.size else (idx - 1 + sorted.size) % sorted.size
+        return sorted[nextIdx].threadId
+    }
 }

@@ -5,22 +5,54 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.KeyboardArrowLeft
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
+import app.webcodex.codex.ui.ActiveSession
 import app.webcodex.codex.ui.CodexViewModel
+import app.webcodex.codex.ui.theme.LocalCodexColors
+
+// ═══════════════════════════════════════════════════════════════
+// Reusable status dot composable
+// ═══════════════════════════════════════════════════════════════
+
+@Composable
+fun SessionStatusDot(
+    session: ActiveSession?,
+    modifier: Modifier = Modifier,
+    size: Int = 8
+) {
+    if (session == null) return
+    val c = LocalCodexColors.current
+    val color = if (session.turnRunning) c.yellow else c.green
+    Box(
+        modifier = modifier
+            .size(size.dp)
+            .clip(CircleShape)
+            .background(color)
+    )
+}
+
+// ═══════════════════════════════════════════════════════════════
+// History drawer sheet content
+// ═══════════════════════════════════════════════════════════════
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HistoryDrawer(
+fun HistoryDrawerContent(
     viewModel: CodexViewModel,
     onDismiss: () -> Unit
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val activeSessionsMap = viewModel.activeSessions
+    val c = LocalCodexColors.current
     val filteredThreads = remember(uiState.threadList, uiState.historySearchQuery) {
         val q = uiState.historySearchQuery.trim().lowercase()
         if (q.isEmpty()) uiState.threadList
@@ -39,131 +71,179 @@ fun HistoryDrawer(
         )
     }
 
-    ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(
+    Column(
+        modifier = Modifier
+            .fillMaxHeight()
+            .width(300.dp)
+            .background(c.surface)
+            .padding(top = 48.dp)
+    ) {
+        // Header
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp)
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text("Chats", style = MaterialTheme.typography.titleMedium)
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Button(
-                        onClick = { viewModel.openNewChatModal() },
-                        modifier = Modifier.height(36.dp),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
-                    ) { Text("New", style = MaterialTheme.typography.labelLarge) }
-                    IconButton(onClick = onDismiss) {
-                        Icon(Icons.Default.KeyboardArrowLeft, contentDescription = "Collapse")
-                    }
+            Text("Chats", style = MaterialTheme.typography.titleMedium, color = c.text)
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                IconButton(onClick = { viewModel.openNewChatModal() }) {
+                    Icon(Icons.Default.Add, contentDescription = "New chat", tint = c.accent)
+                }
+                IconButton(onClick = onDismiss) {
+                    Icon(Icons.Default.KeyboardArrowLeft, contentDescription = "Close", tint = c.text2)
                 }
             }
+        }
 
-            Spacer(Modifier.height(12.dp))
-
-            OutlinedTextField(
-                value = uiState.historySearchQuery,
-                onValueChange = { viewModel.setHistorySearchQuery(it) },
-                placeholder = { Text("Search…") },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true
+        // Search
+        OutlinedTextField(
+            value = uiState.historySearchQuery,
+            onValueChange = { viewModel.setHistorySearchQuery(it) },
+            placeholder = { Text("Search…", color = c.muted) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp),
+            singleLine = true,
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = c.accent,
+                unfocusedBorderColor = c.border,
+                focusedTextColor = c.text,
+                unfocusedTextColor = c.text,
+                cursorColor = c.accent,
+                focusedContainerColor = c.surface2,
+                unfocusedContainerColor = c.surface2
             )
-            Spacer(Modifier.height(8.dp))
+        )
+        Spacer(Modifier.height(8.dp))
 
-            var wsExpanded by remember { mutableStateOf(false) }
-            val wsOptions = listOf("" to "All workspaces") + uiState.workspaces.map { it.path to it.name }
-            ExposedDropdownMenuBox(
-                expanded = wsExpanded,
-                onExpandedChange = { wsExpanded = it },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                OutlinedTextField(
-                    value = wsOptions.firstOrNull { it.first == (uiState.historyWorkspaceFilter ?: "") }?.second ?: "All workspaces",
-                    onValueChange = {},
-                    readOnly = true,
+        // Workspace filter
+        var wsExpanded by remember { mutableStateOf(false) }
+        val wsOptions = listOf("" to "All workspaces") + uiState.workspaces.map { it.path to it.name }
+        ExposedDropdownMenuBox(
+            expanded = wsExpanded,
+            onExpandedChange = { wsExpanded = it },
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
+        ) {
+            OutlinedTextField(
+                value = wsOptions.firstOrNull { it.first == (uiState.historyWorkspaceFilter ?: "") }?.second ?: "All workspaces",
+                onValueChange = {},
+                readOnly = true,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .menuAnchor(),
+                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = wsExpanded) },
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = c.accent,
+                    unfocusedBorderColor = c.border,
+                    focusedTextColor = c.text,
+                    unfocusedTextColor = c.text
+                )
+            )
+            ExposedDropdownMenu(expanded = wsExpanded, onDismissRequest = { wsExpanded = false }) {
+                wsOptions.forEach { (path, name) ->
+                    DropdownMenuItem(
+                        text = { Text(name) },
+                        onClick = {
+                            viewModel.setHistoryWorkspaceFilter(path.takeIf { it.isNotEmpty() })
+                            wsExpanded = false
+                        }
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(4.dp))
+
+        // Include archived
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Checkbox(
+                checked = uiState.historyIncludeArchived,
+                onCheckedChange = { viewModel.setHistoryIncludeArchived(it) },
+                colors = CheckboxDefaults.colors(checkedColor = c.accent)
+            )
+            Text("Include archived", style = MaterialTheme.typography.bodyMedium, color = c.text2)
+        }
+
+        Spacer(Modifier.height(4.dp))
+
+        // Thread list
+        LazyColumn(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(0.dp)
+        ) {
+            items(filteredThreads) { t ->
+                val isActive = t.id == uiState.threadId
+                val session = activeSessionsMap[t.id]
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .menuAnchor(),
-                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = wsExpanded) }
-                )
-                ExposedDropdownMenu(expanded = wsExpanded, onDismissRequest = { wsExpanded = false }) {
-                    wsOptions.forEach { (path, name) ->
-                        DropdownMenuItem(
-                            text = { Text(name) },
-                            onClick = {
-                                viewModel.setHistoryWorkspaceFilter(path.takeIf { it.isNotEmpty() })
-                                wsExpanded = false
-                            }
-                        )
-                    }
-                }
-            }
-            Spacer(Modifier.height(8.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Checkbox(
-                    checked = uiState.historyIncludeArchived,
-                    onCheckedChange = { viewModel.setHistoryIncludeArchived(it) }
-                )
-                Text("Include archived", style = MaterialTheme.typography.bodyMedium)
-            }
-
-            Spacer(Modifier.height(8.dp))
-
-            LazyColumn(
-                modifier = Modifier.heightIn(max = 400.dp),
-                verticalArrangement = Arrangement.spacedBy(0.dp)
-            ) {
-                items(filteredThreads) { t ->
-                    val isActive = t.id == uiState.threadId
-                    Row(
+                        .clickable {
+                            viewModel.resumeThread(t.id)
+                            onDismiss()
+                        }
+                        .padding(0.dp, 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Active thread rail highlight
+                    Box(
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                viewModel.resumeThread(t.id)
-                                onDismiss()
-                            }
-                            .padding(0.dp, 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                            .width(3.dp)
+                            .heightIn(min = 40.dp)
+                            .background(
+                                if (isActive) c.accent
+                                else androidx.compose.ui.graphics.Color.Transparent
+                            )
+                    )
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(horizontal = 14.dp, vertical = 6.dp)
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .width(2.dp)
-                                .heightIn(min = 40.dp)
-                                .background(
-                                    if (isActive) MaterialTheme.colorScheme.primary
-                                    else androidx.compose.ui.graphics.Color.Transparent
-                                )
-                        )
-                        Column(
-                            modifier = Modifier
-                                .weight(1f)
-                                .padding(horizontal = 16.dp, vertical = 8.dp)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
+                            // Status dot
+                            SessionStatusDot(session = session)
                             Text(
                                 t.preview.take(60) + if (t.preview.length > 60) "…" else "",
                                 style = MaterialTheme.typography.bodyMedium,
-                                color = if (isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
-                            )
-                            Text(
-                                java.text.SimpleDateFormat("MMM d, h:mm", java.util.Locale.getDefault())
-                                    .format(java.util.Date(t.updatedAt * 1000)),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                color = if (isActive) c.accent else c.text,
+                                maxLines = 1
                             )
                         }
+                        Text(
+                            java.text.SimpleDateFormat("MMM d, h:mm", java.util.Locale.getDefault())
+                                .format(java.util.Date(t.updatedAt * 1000)),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = c.muted
+                        )
                     }
                 }
             }
         }
     }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Legacy wrapper — keeps existing callers working during migration
+// ═══════════════════════════════════════════════════════════════
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun HistoryDrawer(
+    viewModel: CodexViewModel,
+    onDismiss: () -> Unit
+) {
+    HistoryDrawerContent(viewModel = viewModel, onDismiss = onDismiss)
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

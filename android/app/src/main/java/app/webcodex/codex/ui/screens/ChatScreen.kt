@@ -52,6 +52,25 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
+import kotlinx.coroutines.launch
+import kotlin.math.abs
+import kotlinx.coroutines.delay
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.SizeTransform
+import androidx.compose.ui.graphics.graphicsLayer
 
 private const val URL_ANNOTATION_TAG = "url"
 
@@ -416,7 +435,143 @@ fun ChatScreen(
         }
     }
 
-    Column(modifier = modifier.background(c.bg)) {
+    // Drawer state — driven by uiState.showHistory
+    val drawerState = rememberDrawerState(DrawerValue.Closed)
+    LaunchedEffect(uiState.showHistory) {
+        if (uiState.showHistory) drawerState.open() else drawerState.close()
+    }
+    LaunchedEffect(drawerState.currentValue) {
+        if (drawerState.currentValue == DrawerValue.Closed && uiState.showHistory) {
+            viewModel.setShowHistory(false)
+        } else if (drawerState.currentValue == DrawerValue.Open && !uiState.showHistory) {
+            viewModel.setShowHistory(true)
+        }
+    }
+
+    // Session switch toast state (custom, replaces default Snackbar)
+    var switchToastMessage by remember { mutableStateOf<String?>(null) }
+    var toastDismissJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    val scope = rememberCoroutineScope()
+
+    // Two-finger gesture state
+    val density = LocalDensity.current
+    val twoFingerThresholdHPx = with(density) { 80.dp.toPx() }
+    val twoFingerThresholdVPx = with(density) { 35.dp.toPx() }
+
+    // Interactive gesture-tracked swipe state
+    val swipeOffset = remember { Animatable(0f) } // in px
+    var peekTargetId by remember { mutableStateOf<String?>(null) }
+    var peekDirection by remember { mutableStateOf(0) } // -1 swipe right (prev), 1 swipe left (next)
+    val screenWidthPx = with(density) { (androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp).dp.toPx() }
+
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            ModalDrawerSheet {
+                HistoryDrawerContent(
+                    viewModel = viewModel,
+                    onDismiss = { viewModel.setShowHistory(false) }
+                )
+            }
+        },
+        gesturesEnabled = !uiState.showSettings && !uiState.showActiveSessionsOverlay
+    ) {
+
+    // Two-finger gesture modifier
+    val twoFingerGestureModifier = Modifier.pointerInput(Unit) {
+        awaitPointerEventScope {
+            while (true) {
+                val firstDown = awaitPointerEvent()
+                val pointers = firstDown.changes.filter { it.pressed }
+                if (pointers.size < 2) continue
+
+                val startAvgX = pointers.map { it.position.x }.average().toFloat()
+                val startAvgY = pointers.map { it.position.y }.average().toFloat()
+                var gestureAxis: String? = null // null = undecided, "h" = horizontal, "v" = vertical
+                var committedDir = 0
+
+                while (true) {
+                    val event = awaitPointerEvent()
+                    val current = event.changes.filter { it.pressed }
+                    if (current.size < 2) {
+                        // Fingers lifted — resolve gesture
+                        if (gestureAxis == "h" && committedDir != 0) {
+                            val offset = swipeOffset.value
+                            val commitThreshold = screenWidthPx * 0.35f
+                            if (abs(offset) > commitThreshold) {
+                                // Commit switch
+                                val targetId = peekTargetId
+                                scope.launch {
+                                    swipeOffset.animateTo(
+                                        -committedDir * screenWidthPx,
+                                        spring(dampingRatio = 0.85f, stiffness = Spring.StiffnessMediumLow)
+                                    )
+                                    if (targetId != null) {
+                                        viewModel.resumeThread(targetId)
+                                        switchToastMessage = viewModel.activeSessions[targetId]?.preview?.take(30) ?: "Session"
+                                        toastDismissJob?.cancel()
+                                        toastDismissJob = scope.launch { delay(1500); switchToastMessage = null }
+                                    }
+                                    peekTargetId = null
+                                    peekDirection = 0
+                                    swipeOffset.snapTo(0f)
+                                }
+                            } else {
+                                // Bounce back
+                                scope.launch {
+                                    swipeOffset.animateTo(0f, spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessMedium))
+                                    peekTargetId = null
+                                    peekDirection = 0
+                                }
+                            }
+                        }
+                        break
+                    }
+
+                    val curAvgX = current.map { it.position.x }.average().toFloat()
+                    val curAvgY = current.map { it.position.y }.average().toFloat()
+                    val dx = curAvgX - startAvgX
+                    val dy = curAvgY - startAvgY
+
+                    // Decide gesture axis once past dead zone
+                    if (gestureAxis == null && (abs(dx) > 30f || abs(dy) > 30f)) {
+                        gestureAxis = if (abs(dx) > abs(dy)) "h" else "v"
+                        if (gestureAxis == "v" && dy < -twoFingerThresholdVPx && abs(dy) > abs(dx) * 1.5f) {
+                            viewModel.setShowActiveSessionsOverlay(true)
+                            current.forEach { it.consume() }
+                            break
+                        }
+                        if (gestureAxis == "h") {
+                            // Determine direction and peek target
+                            val forward = dx < 0
+                            committedDir = if (forward) 1 else -1
+                            peekDirection = committedDir
+                            peekTargetId = viewModel.cycleActiveSession(forward)
+                        }
+                    }
+
+                    // Track finger on horizontal axis
+                    if (gestureAxis == "h" && committedDir != 0 && peekTargetId != null) {
+                        val clampedDx = if (committedDir > 0) dx.coerceAtMost(0f) else dx.coerceAtLeast(0f)
+                        scope.launch { swipeOffset.snapTo(clampedDx) }
+                        current.forEach { it.consume() }
+                    }
+                    // Vertical gesture (not drag)
+                    else if (gestureAxis == "v") {
+                        if (dy < -twoFingerThresholdVPx && abs(dy) > abs(dx) * 1.5f) {
+                            viewModel.setShowActiveSessionsOverlay(true)
+                            current.forEach { it.consume() }
+                            break
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+
+    Column(modifier = modifier.background(c.bg).then(twoFingerGestureModifier)) {
 
         // ─── Header ───────────────────────────────────────────────────────────
         TopAppBar(
@@ -633,27 +788,70 @@ fun ChatScreen(
 
         // ─── Messages ─────────────────────────────────────────────────────────
         val lineWidthDp = CodexTheme.lineWidth
+        val currentSwipeOffset = swipeOffset.value
+        val peekMsgs = peekTargetId?.let { viewModel.sessionMessageCache[it] }
+
         Box(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
+                .clipToBounds()
         ) {
-            LazyColumn(
-                state = listState,
+            // Current content — follows finger
+            Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .widthIn(max = lineWidthDp)
-                    .align(Alignment.Center),
-                contentPadding = PaddingValues(horizontal = spacing.large, vertical = spacing.medium),
-                verticalArrangement = Arrangement.spacedBy(spacing.small)
+                    .graphicsLayer { translationX = currentSwipeOffset }
             ) {
-            if (uiState.messages.isEmpty()) {
-                item { WelcomeSection(spacing, c) { input = it } }
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .widthIn(max = lineWidthDp)
+                        .align(Alignment.Center),
+                    contentPadding = PaddingValues(horizontal = spacing.large, vertical = spacing.medium),
+                    verticalArrangement = Arrangement.spacedBy(spacing.small)
+                ) {
+                    if (uiState.messages.isEmpty()) {
+                        item { WelcomeSection(spacing, c) { input = it } }
+                    }
+                    items(uiState.messages) { msg ->
+                        MessageRow(msg = msg, viewModel = viewModel, itemTexts = uiState.itemTexts)
+                    }
+                }
             }
-            items(uiState.messages) { msg ->
-                MessageRow(msg = msg, viewModel = viewModel, itemTexts = uiState.itemTexts)
+
+            // Peek content — adjacent session sliding in from the edge
+            if (peekTargetId != null && currentSwipeOffset != 0f) {
+                val peekOffsetX = currentSwipeOffset + (peekDirection * screenWidthPx)
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer { translationX = peekOffsetX }
+                ) {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .widthIn(max = lineWidthDp)
+                            .align(Alignment.Center),
+                        contentPadding = PaddingValues(horizontal = spacing.large, vertical = spacing.medium),
+                        verticalArrangement = Arrangement.spacedBy(spacing.small)
+                    ) {
+                        val msgs = peekMsgs ?: emptyList()
+                        if (msgs.isEmpty()) {
+                            item {
+                                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                    Text("Loading\u2026", color = c.muted, style = MaterialTheme.typography.bodyMedium)
+                                }
+                            }
+                        } else {
+                            items(msgs) { msg ->
+                                MessageRow(msg = msg, viewModel = viewModel, itemTexts = emptyMap())
+                            }
+                        }
+                    }
+                }
             }
-        }
         }
 
         // ─── Input area ───────────────────────────────────────────────────────
@@ -790,10 +988,55 @@ fun ChatScreen(
         if (uiState.showSettings) {
             SettingsSheet(viewModel = viewModel, onDismiss = { viewModel.toggleSettings() })
         }
-        if (uiState.showHistory) {
-            HistoryDrawer(viewModel = viewModel, onDismiss = { viewModel.toggleHistory() })
+    }
+
+    // ─── Top toast for session switch ─────────────────────────────────────
+    AnimatedVisibility(
+        visible = switchToastMessage != null,
+        enter = slideInVertically(
+            initialOffsetY = { -it },
+            animationSpec = spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessMedium)
+        ) + fadeIn(tween(150)),
+        exit = slideOutVertically(
+            targetOffsetY = { -it },
+            animationSpec = tween(200)
+        ) + fadeOut(tween(150)),
+        modifier = Modifier
+            .align(Alignment.TopCenter)
+            .padding(top = 52.dp)
+    ) {
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = c.surface2.copy(alpha = 0.95f),
+            shadowElevation = 6.dp,
+            border = androidx.compose.foundation.BorderStroke(0.5.dp, c.border.copy(alpha = 0.3f))
+        ) {
+            Text(
+                switchToastMessage ?: "",
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                style = MaterialTheme.typography.labelMedium,
+                color = c.text,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
     }
+
+    // ─── Active sessions overlay ──────────────────────────────────────────
+    AnimatedVisibility(
+        visible = uiState.showActiveSessionsOverlay,
+        enter = fadeIn(tween(200)),
+        exit = fadeOut(tween(180)),
+        modifier = Modifier.fillMaxSize()
+    ) {
+        ActiveSessionsOverlay(
+            viewModel = viewModel,
+            onDismiss = { viewModel.setShowActiveSessionsOverlay(false) }
+        )
+    }
+
+    } // end Box
+    } // end ModalNavigationDrawer
 }
 
 @Composable

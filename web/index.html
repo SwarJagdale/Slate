@@ -370,6 +370,18 @@
       background: var(--surface2)
     }
 
+    .hp-thread.running .hp-thread-preview::before {
+      content: '';
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--yellow);
+      margin-right: 6px;
+      vertical-align: middle;
+      animation: breathe 1.6s ease infinite
+    }
+
     .hp-thread-preview {
       white-space: nowrap;
       overflow: hidden;
@@ -2945,6 +2957,7 @@
     // Thread history
     let threadListCache = [];
     let threadListCursor = null;
+    const runningThreadIds = new Set();
 
     // ═══════════════════════════════════════════════════════════════
     // Settings persistence
@@ -3994,16 +4007,19 @@
         case 'error':
           addError((params.error?.message || JSON.stringify(params))
             + (params.error?.additionalDetails ? '\n' + params.error.additionalDetails : ''));
+          if (params.threadId) { runningThreadIds.delete(params.threadId); renderThreadList(); }
           setTurnIdle();
           return;
 
         case 'turn/started':
           lastStderr = null;
+          if (params.threadId) { runningThreadIds.add(params.threadId); renderThreadList(); }
           if (params.turn?.id) setTurnActive(params.turn.id);
           setStatus('busy', 'working…');
           return;
 
         case 'turn/completed':
+          if (params.threadId) { runningThreadIds.delete(params.threadId); renderThreadList(); }
           setStatus('ok', 'ready');
           setTurnIdle();
           return;
@@ -4282,7 +4298,8 @@
           const preview = (t.preview || 'Empty').slice(0, 80);
           const date = t.updatedAt ? new Date(t.updatedAt * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
           const active = t.id === threadId ? ' active' : '';
-          return `<button class="hp-thread${active}" data-thread-id="${h(t.id)}" data-thread-cwd="${h(t.cwd || '')}">
+          const running = runningThreadIds.has(t.id) ? ' running' : '';
+          return `<button class="hp-thread${active}${running}" data-thread-id="${h(t.id)}" data-thread-cwd="${h(t.cwd || '')}">
             <div class="hp-thread-preview">${h(preview)}</div>
             <div class="hp-thread-meta">${h(date)}</div>
           </button>`;

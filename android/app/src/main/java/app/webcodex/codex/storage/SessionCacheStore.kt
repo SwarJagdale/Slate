@@ -35,8 +35,20 @@ data class CachedWorkspaceOption(
     val path: String
 )
 
+data class CachedActiveSession(
+    val threadId: String,
+    val preview: String,
+    val workspacePath: String?,
+    val workspaceName: String?,
+    val turnRunning: Boolean,
+    val lastActivityAt: Long
+)
+
 class SessionCacheStore(private val context: Context) {
-    companion object { private const val KEY_SNAPSHOT = "snapshot" }
+    companion object {
+        private const val KEY_SNAPSHOT = "snapshot"
+        private const val KEY_ACTIVE_SESSIONS = "active_sessions"
+    }
 
     private val masterKey = MasterKey.Builder(context)
         .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
@@ -176,5 +188,48 @@ class SessionCacheStore(private val context: Context) {
     private fun JSONObject.readNullableString(key: String): String? {
         if (isNull(key)) return null
         return optString(key).ifBlank { null }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Active sessions persistence
+    // ═══════════════════════════════════════════════════════════════
+
+    suspend fun readActiveSessions(): List<CachedActiveSession> {
+        val raw = prefs.getString(KEY_ACTIVE_SESSIONS, null) ?: return emptyList()
+        return runCatching { decodeActiveSessions(raw) }.getOrDefault(emptyList())
+    }
+
+    suspend fun writeActiveSessions(sessions: List<CachedActiveSession>) {
+        prefs.edit().putString(KEY_ACTIVE_SESSIONS, encodeActiveSessions(sessions)).apply()
+    }
+
+    private fun encodeActiveSessions(sessions: List<CachedActiveSession>): String {
+        return JSONArray().apply {
+            sessions.forEach { s ->
+                put(JSONObject()
+                    .put("threadId", s.threadId)
+                    .put("preview", s.preview)
+                    .put("workspacePath", s.workspacePath)
+                    .put("workspaceName", s.workspaceName)
+                    .put("turnRunning", s.turnRunning)
+                    .put("lastActivityAt", s.lastActivityAt)
+                )
+            }
+        }.toString()
+    }
+
+    private fun decodeActiveSessions(raw: String): List<CachedActiveSession> {
+        val arr = JSONArray(raw)
+        return (0 until arr.length()).mapNotNull { i ->
+            val obj = arr.optJSONObject(i) ?: return@mapNotNull null
+            CachedActiveSession(
+                threadId = obj.optString("threadId", ""),
+                preview = obj.optString("preview", ""),
+                workspacePath = obj.readNullableString("workspacePath"),
+                workspaceName = obj.readNullableString("workspaceName"),
+                turnRunning = obj.optBoolean("turnRunning", false),
+                lastActivityAt = obj.optLong("lastActivityAt", 0L)
+            )
+        }
     }
 }
