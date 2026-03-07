@@ -1233,7 +1233,8 @@ class CodexViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun cycleActiveSession(forward: Boolean): String? {
-        val sorted = sortedActiveSessions()
+        // Use stable sort (threadId) so cycling order doesn't shift on every switch
+        val sorted = activeSessions.values.sortedBy { it.threadId }
         if (sorted.size < 2) return null
         val currentId = _uiState.value.threadId ?: return null
         val idx = sorted.indexOfFirst { it.threadId == currentId }

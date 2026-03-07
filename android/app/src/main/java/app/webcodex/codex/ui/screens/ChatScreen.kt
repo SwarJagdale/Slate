@@ -71,6 +71,7 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.togetherWith
 import androidx.compose.animation.SizeTransform
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.draw.clipToBounds
 
 private const val URL_ANNOTATION_TAG = "url"
 
@@ -829,7 +830,12 @@ fun ChatScreen(
                         .fillMaxSize()
                         .graphicsLayer { translationX = peekOffsetX }
                 ) {
+                    val msgs = peekMsgs ?: emptyList()
+                    val peekListState = rememberLazyListState(
+                        initialFirstVisibleItemIndex = (msgs.size - 1).coerceAtLeast(0)
+                    )
                     LazyColumn(
+                        state = peekListState,
                         modifier = Modifier
                             .fillMaxSize()
                             .widthIn(max = lineWidthDp)
@@ -837,7 +843,6 @@ fun ChatScreen(
                         contentPadding = PaddingValues(horizontal = spacing.large, vertical = spacing.medium),
                         verticalArrangement = Arrangement.spacedBy(spacing.small)
                     ) {
-                        val msgs = peekMsgs ?: emptyList()
                         if (msgs.isEmpty()) {
                             item {
                                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
