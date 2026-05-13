@@ -763,6 +763,189 @@
       display: block
     }
 
+    /* ── Stage Overlay ─────────────────────────── */
+    .stage-indicator {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0;
+      margin-bottom: 28px
+    }
+
+    .stage-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--border);
+      transition: all .3s
+    }
+
+    .stage-dot.active {
+      background: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-dim)
+    }
+
+    .stage-dot.done {
+      background: var(--green)
+    }
+
+    .stage-line {
+      width: 32px;
+      height: 1px;
+      background: var(--border);
+      margin: 0 6px
+    }
+
+    .stage-line.done {
+      background: var(--green)
+    }
+
+    .stage {
+      display: block
+    }
+
+    .stage-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 24px
+    }
+
+    .stage-actions .btn {
+      flex: 1
+    }
+
+    .stage h2 {
+      font-size: 22px;
+      font-weight: 600;
+      letter-spacing: -.3px;
+      margin-bottom: 4px;
+      color: var(--text)
+    }
+
+    .stage .subtitle {
+      color: var(--muted);
+      font-size: 13px;
+      margin-bottom: 24px;
+      font-weight: 400
+    }
+
+    .field-err {
+      display: none;
+      margin-top: 12px;
+      padding: 10px 14px;
+      border-radius: var(--r);
+      background: var(--red-dim);
+      border: 1px solid rgba(196, 92, 92, .15);
+      color: var(--red);
+      font-size: 13px;
+      line-height: 1.5
+    }
+
+    .field-err.show {
+      display: block
+    }
+
+    /* ── Workspace Tree Picker ─────────────────── */
+    .ws-tree {
+      max-height: 240px;
+      overflow-y: auto;
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      background: var(--surface2);
+      padding: 4px 0;
+      margin-bottom: 4px
+    }
+
+    .ws-tree-loading,
+    .ws-tree-empty {
+      padding: 24px 16px;
+      text-align: center;
+      color: var(--muted);
+      font-size: 13px
+    }
+
+    .ws-breadcrumb {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 6px 12px 4px;
+      font-size: 11px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 2px;
+      flex-wrap: wrap
+    }
+
+    .ws-bc-link {
+      color: var(--accent);
+      text-decoration: none
+    }
+
+    .ws-bc-link:hover {
+      text-decoration: underline
+    }
+
+    .ws-bc-current {
+      color: var(--muted)
+    }
+
+    .ws-bc-sep {
+      color: var(--border);
+      font-size: 10px
+    }
+
+    .ws-tree-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 12px;
+      cursor: pointer;
+      font-size: 13px;
+      color: var(--text2);
+      transition: all .12s;
+      border-radius: 0;
+      user-select: none
+    }
+
+    .ws-tree-item:hover {
+      background: var(--surface3);
+      color: var(--text)
+    }
+
+    .ws-tree-item.selected {
+      background: var(--accent-dim);
+      color: var(--accent);
+      font-weight: 500
+    }
+
+    .ws-tree-item .ws-icon {
+      flex-shrink: 0;
+      font-size: 14px;
+      width: 18px;
+      text-align: center;
+      color: var(--muted)
+    }
+
+    .ws-tree-item.selected .ws-icon {
+      color: var(--accent)
+    }
+
+    .ws-tree-item .ws-path {
+      font-size: 10px;
+      color: var(--muted);
+      margin-left: auto;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: 100px;
+      flex-shrink: 0
+    }
+
+    .ws-tree-item .ws-check {
+      font-size: 12px;
+      color: var(--accent);
+      flex-shrink: 0
+    }
+
     /* ── Chat ──────────────────────────────────── */
     #chat {
       flex: 1;
@@ -2496,25 +2679,63 @@
     <!-- ── Connection Overlay ────────────────────── -->
     <div id="overlay">
       <div class="auth-card">
-        <h2>Cortex</h2>
-        <p class="subtitle">Connect to your workspace</p>
 
-        <div class="field">
-          <span class="field-label">Auth Token</span>
-          <input id="tok" type="password" placeholder="Enter token…" autocomplete="off">
+        <!-- Stage indicator -->
+        <div class="stage-indicator" id="stage-indicator">
+          <div class="stage-dot active" data-stage="1"></div>
+          <div class="stage-line" data-stage="1"></div>
+          <div class="stage-dot" data-stage="2"></div>
+          <div class="stage-line" data-stage="2"></div>
+          <div class="stage-dot" data-stage="3"></div>
         </div>
 
-        <div class="field" id="ws-wrap" style="display:none">
-          <span class="field-label">Workspace</span>
-          <select id="ws-sel"></select>
+        <!-- Stage 1: Server & Auth -->
+        <div class="stage" id="stage-1">
+          <h2>Cortex</h2>
+          <p class="subtitle">Connect to your server</p>
+
+          <div class="field">
+            <span class="field-label">Server</span>
+            <div class="field-row">
+              <input id="tok" type="password" placeholder="Auth token…" autocomplete="off" style="flex:1">
+              <label class="check-row" style="white-space:nowrap;flex-shrink:0;margin:0">
+                <input type="checkbox" id="remember-tok" checked>
+                Remember
+              </label>
+            </div>
+          </div>
+
+          <div class="stage-actions">
+            <button class="btn btn-primary" id="stage-1-next">Continue →</button>
+          </div>
+          <div id="stage-1-err" class="field-err"></div>
         </div>
 
-        <div class="advanced-toggle" id="adv-toggle">
-          <span class="chevron" id="adv-chev">▶</span>
-          <span>Session Settings</span>
+        <!-- Stage 2: Workspace Browser -->
+        <div class="stage" id="stage-2" style="display:none">
+          <h2>Pick a workspace</h2>
+          <p class="subtitle">Choose where to work</p>
+
+          <div class="field">
+            <input id="ws-search" type="text" placeholder="Search workspaces…">
+          </div>
+
+          <div class="ws-tree" id="ws-tree">
+            <div class="ws-tree-loading">Loading…</div>
+          </div>
+
+          <div class="stage-actions">
+            <button class="btn" id="stage-2-back">← Back</button>
+            <button class="btn btn-primary" id="stage-2-next">Select &amp; Continue →</button>
+          </div>
+          <div id="stage-2-err" class="field-err"></div>
         </div>
 
-        <div class="advanced-section" id="adv-section">
+        <!-- Stage 3: Session Settings -->
+        <div class="stage" id="stage-3" style="display:none">
+          <h2>Session settings</h2>
+          <p class="subtitle">Configure before you start</p>
+
           <div class="field">
             <span class="field-label">Model</span>
             <select id="ov-model">
@@ -2526,7 +2747,7 @@
             <select id="ov-approval">
               <option value="on-request">On Request</option>
               <option value="untrusted">Unless Trusted</option>
-              <option value="never">Full Auto (no approvals)</option>
+              <option value="never">Full Auto</option>
             </select>
           </div>
           <div class="field">
@@ -2536,17 +2757,19 @@
               <option value="readOnly">Read Only</option>
             </select>
           </div>
+
+          <div class="field" style="margin-bottom:0">
+            <span class="field-label" id="selected-workspace-label">Workspace</span>
+            <div id="selected-workspace-display" style="font-size:13px;color:var(--muted);padding:4px 0"></div>
+          </div>
+
+          <div class="stage-actions">
+            <button class="btn" id="stage-3-back">← Back</button>
+            <button class="btn btn-primary" id="conn-btn">Connect</button>
+          </div>
+          <div id="conn-err"></div>
         </div>
 
-        <div class="field">
-          <label class="check-row">
-            <input type="checkbox" id="remember-tok" checked>
-            Remember token
-          </label>
-        </div>
-
-        <button class="btn btn-primary" id="conn-btn" style="width:100%">Connect</button>
-        <div id="conn-err"></div>
       </div>
     </div>
 
@@ -2744,7 +2967,20 @@
           <div class="field">
             <span class="field-label">Workspace</span>
             <select id="new-chat-workspace">
-              <option value="">Loading…</option>
+              <option value="">Current</option>
+            </select>
+          </div>
+          <div class="field">
+            <span class="field-label">Model</span>
+            <select id="new-chat-model">
+              <option value="">Default</option>
+            </select>
+          </div>
+          <div class="field">
+            <span class="field-label">Sandbox</span>
+            <select id="new-chat-sandbox">
+              <option value="workspaceWrite">Workspace Write</option>
+              <option value="readOnly">Read Only</option>
             </select>
           </div>
           <div class="new-chat-btns">
@@ -2921,8 +3157,6 @@
     const stxt = $('status-txt');
     const overlay = $('overlay');
     const tokInput = $('tok');
-    const wsSel = $('ws-sel');
-    const wsWrap = $('ws-wrap');
     const connBtn = $('conn-btn');
     const connErr = $('conn-err');
     const discBtn = $('disc-btn');
@@ -2933,6 +3167,15 @@
     const settingsBtn = $('settings-btn');
     const settingsPanel = $('settings-panel');
     const settingsBackdrop = $('settings-backdrop');
+
+    // Stage elements
+    const stageIndicator = $('stage-indicator');
+    const stageDots = stageIndicator?.querySelectorAll('.stage-dot') || [];
+    const stageLines = stageIndicator?.querySelectorAll('.stage-line') || [];
+    let currentStage = 1;
+    let selectedWorkspacePath = '';
+    let workspaceTreeData = null;
+    let workspaceBreadcrumb = [{ name: 'Workspaces', path: '' }];
 
     // ═══════════════════════════════════════════════════════════════
     // State
@@ -2958,6 +3201,30 @@
     let threadListCache = [];
     let threadListCursor = null;
     const runningThreadIds = new Set();
+
+    // ═══════════════════════════════════════════════════════════════
+    // Stage navigation
+    // ═══════════════════════════════════════════════════════════════
+    function showStage(n) {
+      for (let i = 1; i <= 3; i++) {
+        const s = $('stage-' + i);
+        if (s) s.style.display = i === n ? 'block' : 'none';
+      }
+      stageDots.forEach((dot, idx) => {
+        const si = idx + 1;
+        dot.classList.toggle('active', si === n);
+        dot.classList.toggle('done', si < n);
+      });
+      stageLines.forEach((line, idx) => {
+        const si = idx + 1;
+        line.classList.toggle('done', si < n);
+      });
+      currentStage = n;
+    }
+
+    function goToStage1() { showStage(1); }
+    function goToStage2() { showStage(2); }
+    function goToStage3() { showStage(3); }
 
     // ═══════════════════════════════════════════════════════════════
     // Settings persistence
@@ -4004,12 +4271,26 @@
       if (method.startsWith('codex/')) return;
 
       switch (method) {
-        case 'error':
-          addError((params.error?.message || JSON.stringify(params))
-            + (params.error?.additionalDetails ? '\n' + params.error.additionalDetails : ''));
+        case 'error': {
+          const errMsg = params.error?.message || JSON.stringify(params);
+          const isRolloutError = errMsg.includes('no rollout found') || errMsg.includes('rollout not found');
+          if (isRolloutError) {
+            addError('This chat is no longer available (rollout was deleted or expired).');
+            if (params.threadId) { runningThreadIds.delete(params.threadId); renderThreadList(); }
+            // Offer to start a new chat inline
+            const row = document.createElement('div');
+            row.className = 'err-row';
+            row.style.cssText = 'text-align:center;padding:12px';
+            row.innerHTML = '<button class="btn btn-primary" onclick="openNewChatModal()" style="font-size:13px">Start new chat</button>';
+            chatInner.appendChild(row);
+            scrollInstant();
+          } else {
+            addError(errMsg + (params.error?.additionalDetails ? '\n' + params.error.additionalDetails : ''));
+          }
           if (params.threadId) { runningThreadIds.delete(params.threadId); renderThreadList(); }
           setTurnIdle();
           return;
+        }
 
         case 'turn/started':
           lastStderr = null;
@@ -4123,7 +4404,7 @@
         const res = await rpc('model/list', { limit: 50, includeHidden: false }, 10000);
         const models = res.data || [];
         if (!models.length) return;
-        const selectors = [modelHdr, $('sp-model'), $('ov-model')];
+        const selectors = [modelHdr, $('sp-model'), $('ov-model'), $('new-chat-model')];
         selectors.forEach(sel => {
           const current = sel.value;
           sel.innerHTML = '<option value="">Default</option>';
@@ -4142,7 +4423,7 @@
     // ═══════════════════════════════════════════════════════════════
     // Init sequence
     // ═══════════════════════════════════════════════════════════════
-    async function initSession(workspaceName) {
+    async function initSession(workspaceName, skipThreadStart) {
       setStatus('busy', 'initializing…');
       try {
         const ir = await rpc('initialize', {
@@ -4152,25 +4433,44 @@
 
         notify('initialized', {});
 
-        const settings = getSettings();
-
-        const SANDBOX_TO_KEBAB = { workspaceWrite: 'workspace-write', readOnly: 'read-only', dangerFullAccess: 'danger-full-access' };
-        const threadParams = {};
-        if (settings.model) threadParams.model = settings.model;
-        if (settings.approvalPolicy) threadParams.approvalPolicy = settings.approvalPolicy;
-        if (settings.sandbox) threadParams.sandbox = SANDBOX_TO_KEBAB[settings.sandbox] || settings.sandbox;
-
-        const [tr] = await Promise.all([
-          rpc('thread/start', threadParams),
-          loadModels(),
-        ]);
-
-        threadId = tr.thread?.id;
         const ua = ir.userAgent || 'Cortex';
-        // Header model select already populated by loadModels()
 
+        if (!skipThreadStart) {
+          const settings = getSettings();
+          const SANDBOX_TO_KEBAB = { workspaceWrite: 'workspace-write', readOnly: 'read-only', dangerFullAccess: 'danger-full-access' };
+          const threadParams = {};
+          if (settings.model) threadParams.model = settings.model;
+          if (settings.approvalPolicy) threadParams.approvalPolicy = settings.approvalPolicy;
+          if (settings.sandbox) threadParams.sandbox = SANDBOX_TO_KEBAB[settings.sandbox] || settings.sandbox;
+
+          const [tr] = await Promise.all([
+            rpc('thread/start', threadParams),
+            loadModels(),
+          ]);
+
+          threadId = tr.thread?.id;
+          chatInner.innerHTML = '';
+          welcomeVisible = true;
+          const w = document.createElement('div');
+          w.className = 'welcome';
+          w.id = 'welcome';
+          w.innerHTML = `
+        <div class="welcome-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg></div>
+        <h3>What can I help with?</h3>
+        <p>Ask anything about your codebase, or let Cortex make changes for you.</p>
+        <div class="welcome-hints">
+          <div class="welcome-hint" data-hint="Explain the architecture of this project">Explain architecture</div>
+          <div class="welcome-hint" data-hint="Fix the failing tests">Fix failing tests</div>
+          <div class="welcome-hint" data-hint="Refactor for better performance">Optimize performance</div>
+        </div>
+      `;
+          chatInner.appendChild(w);
+          addSystem(`New chat · ${workspaceName}`);
+        } else {
+          await loadModels();
+          addSystem(`Reconnected · ${workspaceName}`);
+        }
         setStatus('ok', 'ready');
-        addSystem(`${ua} · ${workspaceName}`);
         promptEl.disabled = false;
         sendBtn.disabled = false;
         promptEl.focus();
@@ -4182,41 +4482,142 @@
     }
 
     // ═══════════════════════════════════════════════════════════════
-    // Workspace picker
+    // Workspace picker (tree)
     // ═══════════════════════════════════════════════════════════════
-    async function loadWorkspaces(token) {
-      try {
-        const r = await fetch('/workspaces', { headers: { Authorization: 'Bearer ' + token } });
-        if (!r.ok) return;
-        const { base, dirs } = await r.json();
-        wsSel.innerHTML = '';
-        const rootOpt = document.createElement('option');
-        rootOpt.value = base.path;
-        rootOpt.textContent = `${base.name}/ (root)`;
-        wsSel.appendChild(rootOpt);
-        for (const d of dirs) {
-          const o = document.createElement('option');
-          o.value = d.path;
-          o.textContent = d.name + '/';
-          wsSel.appendChild(o);
-        }
-        const qp = new URLSearchParams(location.search);
-        if (qp.get('workspace')) wsSel.value = qp.get('workspace');
-        wsWrap.style.display = 'block';
-      } catch { }
+    // Get children of a node path from the workspace tree data
+    function getNodeChildren(tree, path) {
+      if (!path) return tree;
+      for (const n of tree) {
+        if (n.path === path) return n.children;
+        const found = getNodeChildren(n.children, path);
+        if (found.length > 0) return found;
+      }
+      return [];
     }
 
-    tokInput.addEventListener('blur', () => {
-      const token = tokInput.value.trim();
-      if (token) loadWorkspaces(token);
-    });
-    tokInput.addEventListener('keydown', e => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        const token = tokInput.value.trim();
-        if (token) loadWorkspaces(token);
+    async function loadWorkspaceTree(token) {
+      const treeEl = $('ws-tree');
+      if (!treeEl) return;
+      treeEl.innerHTML = '<div class="ws-tree-loading">Loading…</div>';
+      try {
+        const r = await fetch('/workspaces/tree?depth=4', { headers: { Authorization: 'Bearer ' + token } });
+        if (!r.ok) throw new Error('Failed to load');
+        const data = await r.json();
+        workspaceTreeData = data;
+        workspaceBreadcrumb = [{ name: 'Workspaces', path: '' }];
+        renderWorkspaceTree(treeEl);
+        const qp = new URLSearchParams(location.search);
+        if (qp.get('workspace')) selectWorkspace(qp.get('workspace'));
+      } catch (e) {
+        treeEl.innerHTML = '<div class="ws-tree-empty">Failed to load workspaces</div>';
       }
-    });
+    }
+
+    function renderWorkspaceTree(container) {
+      if (!workspaceTreeData) { container.innerHTML = '<div class="ws-tree-loading">Loading…</div>'; return; }
+      const currentPath = workspaceBreadcrumb[workspaceBreadcrumb.length - 1].path;
+      const nodes = currentPath ? getNodeChildren(workspaceTreeData.tree, currentPath) : workspaceTreeData.tree;
+      if (!nodes || nodes.length === 0) {
+        container.innerHTML = '<div class="ws-tree-empty">No workspaces found</div>';
+        return;
+      }
+      // Breadcrumb
+      let html = '<div class="ws-breadcrumb">';
+      workspaceBreadcrumb.forEach((cr, i) => {
+        if (i > 0) html += '<span class="ws-bc-sep">/</span>';
+        if (i < workspaceBreadcrumb.length - 1) {
+          html += `<a href="#" class="ws-bc-link" data-bc-idx="${i}">${h(cr.name)}</a>`;
+        } else {
+          html += `<span class="ws-bc-current">${h(cr.name)}</span>`;
+        }
+      });
+      html += '</div>';
+      // Up link
+      if (workspaceBreadcrumb.length > 1) {
+        html += '<div class="ws-tree-item ws-up-item" data-up><span class="ws-icon">←</span><span>..</span></div>';
+      }
+      // Entries
+      for (const node of nodes) {
+        const hasChildren = node.children && node.children.length > 0;
+        const sel = (node.path === selectedWorkspacePath || node.path === (selectedWorkspacePath || '')) ? ' selected' : '';
+        html += `<div class="ws-tree-item${sel}" data-path="${h(node.path)}" data-name="${h(node.name)}" data-has-children="${hasChildren}">`;
+        html += `<span class="ws-icon">${hasChildren ? '📂' : '📄'}</span>`;
+        html += `<span class="ws-label">${h(node.name)}</span>`;
+        const parts = node.path.split('/');
+        if (parts.length > 2) html += `<span class="ws-path">…/${h(parts.slice(-2).join('/'))}</span>`;
+        if (sel) html += '<span class="ws-check">✓</span>';
+        html += '</div>';
+      }
+      container.innerHTML = html;
+
+      // Click handlers
+      container.querySelectorAll('.ws-bc-link').forEach(a => {
+        a.addEventListener('click', (e) => {
+          e.preventDefault();
+          workspaceBreadcrumb = workspaceBreadcrumb.slice(0, Number(a.dataset.bcIdx) + 1);
+          renderWorkspaceTree(container);
+        });
+      });
+      container.querySelector('.ws-up-item')?.addEventListener('click', () => {
+        workspaceBreadcrumb = workspaceBreadcrumb.slice(0, -1);
+        renderWorkspaceTree(container);
+      });
+      container.querySelectorAll('.ws-tree-item[data-has-children]').forEach(item => {
+        item.addEventListener('click', (e) => {
+          if (item.dataset.hasChildren === 'true') {
+            workspaceBreadcrumb.push({ name: item.dataset.name, path: item.dataset.path });
+            renderWorkspaceTree(container);
+          } else {
+            selectWorkspace(item.dataset.path, item);
+          }
+        });
+      });
+    }
+
+    function selectWorkspace(path, itemEl) {
+      selectedWorkspacePath = path;
+      const all = document.querySelectorAll('.ws-tree-item');
+      all.forEach(el => el.classList.remove('selected'));
+      if (itemEl) itemEl.classList.add('selected');
+      else {
+        const match = document.querySelector(`.ws-tree-item[data-path="${h(path)}"]`);
+        if (match) match.classList.add('selected');
+      }
+      $('selected-workspace-display').textContent = path;
+    }
+
+    async function searchWorkspaces(token, q) {
+      if (!q) { loadWorkspaceTree(token); return; }
+      const treeEl = $('ws-tree');
+      if (!treeEl) return;
+      treeEl.innerHTML = '<div class="ws-tree-loading">Searching…</div>';
+      try {
+        const r = await fetch('/workspaces/search?q=' + encodeURIComponent(q), { headers: { Authorization: 'Bearer ' + token } });
+        if (!r.ok) throw new Error('Failed');
+        const { results } = await r.json();
+        if (results.length === 0) {
+          treeEl.innerHTML = '<div class="ws-tree-empty">No matches for "' + h(q) + '"</div>';
+          return;
+        }
+        treeEl.innerHTML = '';
+        for (const res of results) {
+          const item = document.createElement('div');
+          item.className = 'ws-tree-item';
+          item.dataset.path = res.path;
+          const icon = document.createElement('span');
+          icon.className = 'ws-icon';
+          icon.textContent = '📁';
+          item.appendChild(icon);
+          const label = document.createElement('span');
+          label.textContent = res.display || res.name;
+          item.appendChild(label);
+          item.addEventListener('click', () => selectWorkspace(res.path, item));
+          treeEl.appendChild(item);
+        }
+      } catch {
+        treeEl.innerHTML = '<div class="ws-tree-empty">Search failed</div>';
+      }
+    }
 
     // ═══════════════════════════════════════════════════════════════
     // Thread history
@@ -4335,7 +4736,7 @@
 
     async function connect() {
       const token = tokInput.value.trim();
-      if (!token) { tokInput.focus(); showConnErr('Enter an auth token.'); return; }
+      if (!token) { showStage(1); tokInput.focus(); showConnErr('Enter an auth token.'); return; }
       hideConnErr();
 
       // Sync overlay settings → settings panel + header
@@ -4348,7 +4749,7 @@
       if ($('remember-tok').checked) saveToken(token);
       else saveToken('');
 
-      const workspace = wsSel.value;
+      const workspace = selectedWorkspacePath;
       sessionWorkspacePath = workspace || null;
 
       let sid;
@@ -4396,6 +4797,9 @@
         lastStderr = null; sbTokens = null; sbRLMap.clear();
         renderStatusBar();
         renderQueue();
+        // Reset to stage 1 for reconnection
+        goToStage1();
+        selectedWorkspacePath = '';
       };
 
       ws.onerror = () => setStatus('err', 'error');
@@ -4407,13 +4811,72 @@
           case 'session_ready': initSession(msg.workspaceName || msg.workspace); return;
           case 'event': onAppMsg(msg.data); return;
           case 'stderr': addStderr(msg.data); return;
-          case 'error': addError(msg.error); return;
+          case 'error': {
+            const errStr = typeof msg.error === 'string' ? msg.error : msg.error?.message || JSON.stringify(msg.error);
+            if (errStr.includes('no rollout found')) {
+              addError('Session error: rollout not found. Try starting a new chat.');
+            } else {
+              addError(errStr);
+            }
+            return;
+          }
           case 'session_closed': addSystem('Session closed · ' + msg.reason); return;
         }
       };
     }
 
+    // Stage navigation buttons
+    $('stage-1-next').addEventListener('click', async () => {
+      const token = tokInput.value.trim();
+      if (!token) { $('stage-1-err').textContent = 'Enter an auth token.'; $('stage-1-err').classList.add('show'); return; }
+      $('stage-1-err').classList.remove('show');
+      $('stage-1-next').disabled = true;
+      $('stage-1-next').textContent = 'Loading…';
+      if ($('remember-tok').checked) saveToken(token);
+      // Validate token and load workspaces
+      try {
+        const r = await fetch('/workspaces/tree?depth=4', { headers: { Authorization: 'Bearer ' + token } });
+        if (!r.ok) throw new Error('Auth rejected');
+        const data = await r.json();
+        workspaceTreeData = data;
+        workspaceBreadcrumb = [{ name: 'Workspaces', path: '' }];
+        goToStage2();
+        renderWorkspaceTree($('ws-tree'));
+      } catch (e) {
+        $('stage-1-err').textContent = e.message === 'Auth rejected' ? 'Invalid token.' : 'Connection failed.';
+        $('stage-1-err').classList.add('show');
+      }
+      $('stage-1-next').disabled = false;
+      $('stage-1-next').textContent = 'Continue →';
+    });
+
+    $('stage-2-back').addEventListener('click', () => { goToStage1(); });
+    $('stage-2-next').addEventListener('click', () => {
+      if (!selectedWorkspacePath) { $('stage-2-err').textContent = 'Select a workspace first.'; $('stage-2-err').classList.add('show'); return; }
+      $('stage-2-err').classList.remove('show');
+      $('selected-workspace-display').textContent = selectedWorkspacePath;
+      goToStage3();
+    });
+
+    $('stage-3-back').addEventListener('click', () => { goToStage2(); });
     connBtn.addEventListener('click', connect);
+
+    // Workspace search
+    const wsSearch = $('ws-search');
+    if (wsSearch) {
+      let searchTimer = null;
+      wsSearch.addEventListener('input', () => {
+        clearTimeout(searchTimer);
+        const token = tokInput.value.trim();
+        if (!token) return;
+        const q = wsSearch.value.trim();
+        searchTimer = setTimeout(() => {
+          if (q) searchWorkspaces(token, q);
+          else loadWorkspaceTree(token);
+        }, 250);
+      });
+    }
+
     discBtn.addEventListener('click', () => {
       if (!ws) return;
       try { ws.send(JSON.stringify({ type: 'close' })); } catch { }
@@ -4809,7 +5272,12 @@
     $('new-chat-start')?.addEventListener('click', () => {
       const sel = $('new-chat-workspace');
       const workspace = sel?.value ?? '';
-      startNewThread(workspace);
+      const modelSel = $('new-chat-model');
+      const sandboxSel = $('new-chat-sandbox');
+      startNewThread(workspace, {
+        model: modelSel?.value || '',
+        sandbox: sandboxSel?.value || '',
+      });
     });
     $('new-chat-cancel')?.addEventListener('click', closeNewChatModal);
     $('new-chat-close')?.addEventListener('click', closeNewChatModal);
@@ -4895,34 +5363,47 @@
       }
       const sel = $('new-chat-workspace');
       if (!sel) return;
-      sel.innerHTML = '<option value="">Loading…</option>';
+      // Sync model select from header
+      const modelSel = $('new-chat-model');
+      if (modelSel) modelSel.value = modelHdr.value || '';
+      const sandboxSel = $('new-chat-sandbox');
+      if (sandboxSel) sandboxSel.value = $('sp-sandbox')?.value || 'workspaceWrite';
+
       $('new-chat-modal')?.classList.add('open');
       $('new-chat-backdrop')?.classList.add('open');
+
+      // Populate workspace select from tree API
       const token = tokInput?.value?.trim() || loadToken();
-      if (!token) { sel.innerHTML = '<option value="">No token</option>'; return; }
-      try {
-        const r = await fetch('/workspaces', { headers: { Authorization: 'Bearer ' + token } });
-        if (!r.ok) throw new Error('Failed to load workspaces');
-        const { base, dirs } = await r.json();
-        sel.innerHTML = '';
-        const rootOpt = document.createElement('option');
-        rootOpt.value = base.path;
-        rootOpt.textContent = base.name + '/ (root)';
-        sel.appendChild(rootOpt);
-        for (const d of dirs) {
-          const o = document.createElement('option');
-          o.value = d.path;
-          o.textContent = d.name + '/';
-          sel.appendChild(o);
+      sel.innerHTML = '<option value="">Loading…</option>';
+      if (token) {
+        try {
+          const r = await fetch('/workspaces/tree?depth=4', { headers: { Authorization: 'Bearer ' + token } });
+          if (r.ok) {
+            const data = await r.json();
+            const opts = data.flat || [];
+            if (opts.length) {
+              sel.innerHTML = '<option value="">Current</option>';
+              for (const f of opts) {
+                const o = document.createElement('option');
+                o.value = f.path;
+                o.textContent = f.display || f.name;
+                sel.appendChild(o);
+              }
+            } else {
+              sel.innerHTML = '<option value="">Current</option>';
+            }
+          } else {
+            sel.innerHTML = '<option value="">Current</option>';
+          }
+        } catch {
+          sel.innerHTML = '<option value="">Current</option>';
         }
-        const current = sessionWorkspacePath || base.path;
-        sel.value = current;
-      } catch (e) {
-        sel.innerHTML = '<option value="">' + h(e.message) + '</option>';
+      } else {
+        sel.innerHTML = '<option value="">Current</option>';
       }
     }
 
-    async function startNewThread(workspacePath) {
+    async function startNewThread(workspacePath, overrides) {
       if (!ws || ws.readyState !== WebSocket.OPEN) return;
       closeHistory();
       closeNewChatModal();
@@ -4935,7 +5416,7 @@
       const needsReconnect = targetWorkspace && targetWorkspace !== sessionWorkspacePath;
       if (needsReconnect) {
         if (ws) { ws.close(); ws = null; }
-        if (wsSel) wsSel.value = targetWorkspace;
+        selectedWorkspacePath = targetWorkspace;
         sessionWorkspacePath = targetWorkspace;
         connect();
         return;
@@ -4945,9 +5426,11 @@
         const settings = getSettings();
         const SANDBOX_TO_KEBAB = { workspaceWrite: 'workspace-write', readOnly: 'read-only', dangerFullAccess: 'danger-full-access' };
         const threadParams = {};
-        if (settings.model) threadParams.model = settings.model;
+        const model = overrides?.model || settings.model;
+        const sandbox = overrides?.sandbox || settings.sandbox;
+        if (model) threadParams.model = model;
         if (settings.approvalPolicy) threadParams.approvalPolicy = settings.approvalPolicy;
-        if (settings.sandbox) threadParams.sandbox = SANDBOX_TO_KEBAB[settings.sandbox] || settings.sandbox;
+        if (sandbox) threadParams.sandbox = SANDBOX_TO_KEBAB[sandbox] || sandbox;
 
         const res = await rpc('thread/start', threadParams, 15000);
         threadId = res.thread?.id;
@@ -4995,16 +5478,14 @@
       $('sp-model').value = $('ov-model').value;
     });
 
-    // Advanced toggle in overlay
-    $('adv-toggle').addEventListener('click', () => {
-      $('adv-section').classList.toggle('open');
-      $('adv-chev').classList.toggle('open');
-    });
-
     // ═══════════════════════════════════════════════════════════════
     // Bootstrap
     // ═══════════════════════════════════════════════════════════════
-    if (tokInput.value.trim()) loadWorkspaces(tokInput.value.trim());
+    const savedToken = loadToken();
+    if (savedToken) {
+      tokInput.value = savedToken;
+      $('stage-1-next').click();
+    }
   </script>
 </body>
 

@@ -61,6 +61,8 @@ data class CodexUiState(
     val pendingQueue: List<String> = emptyList(),
     val threadList: List<ThreadSummary> = emptyList(),
     val workspaces: List<WorkspaceOption> = emptyList(),
+    val workspaceTree: List<app.webcodex.codex.network.WorkspaceTreeNode> = emptyList(),
+    val workspaceTreeLoading: Boolean = false,
     val workspacesLoading: Boolean = false,
     val workspacesError: String? = null,
     val models: List<ModelOption> = emptyList(),
@@ -77,7 +79,12 @@ data class CodexUiState(
     val itemTexts: Map<String, String> = emptyMap(),
     val hasOfflineCache: Boolean = false,
     val preferOfflineHome: Boolean = false,
-    val showActiveSessionsOverlay: Boolean = false
+    val showActiveSessionsOverlay: Boolean = false,
+    // Stage tracking for connect screen
+    val connectStage: Int = 1,
+    val workspacesSearched: Boolean = false,
+    val workspaceSearchQuery: String = "",
+    val workspaceSearchResults: List<app.webcodex.codex.network.WorkspaceFlatNode> = emptyList()
 )
 
 data class ThreadSummary(val id: String, val preview: String, val cwd: String?, val updatedAt: Long)
@@ -110,6 +117,7 @@ class CodexViewModel(application: Application) : AndroidViewModel(application) {
 
     val activeSessions = mutableStateMapOf<String, ActiveSession>()
     val sessionMessageCache = mutableMapOf<String, List<ChatMessage>>()
+    val runningThreadIds = mutableSetOf<String>()
 
     init {
         viewModelScope.launch {
@@ -222,7 +230,7 @@ class CodexViewModel(application: Application) : AndroidViewModel(application) {
 
         if (!shouldAutoConnect) return
 
-        _uiState.update { it.copy(token = savedToken) }
+        _uiState.update { it.copy(token = savedToken, connectStage = 3) }
         connect(
             host = settings.serverHost,
             port = settings.serverPort,
@@ -419,9 +427,30 @@ class CodexViewModel(application: Application) : AndroidViewModel(application) {
             }
             "error" -> {
                 if (eventThreadId != null) markSessionIdle(eventThreadId)
+                val errMsg = params.optJSONObject("error")?.optString("message") ?: "Unknown error"
+                val isRolloutError = errMsg.contains("no rollout found") || errMsg.contains("rollout not found")
                 if (isCurrentThread) {
-                    addError(params.optJSONObject("error")?.optString("message") ?: "Unknown error")
-                    _uiState.update { it.copy(activeTurnId = null, connectionStatus = "error") }
+                    if (isRolloutError) {
+                        addError("This chat is no longer available (rollout was deleted or expired). Start a new chat.")
+                        _uiState.update {
+                            it.copy(
+                                messages = it.messages + ChatMessage(
+                                    "r-${System.currentTimeMillis()}",
+                                    MessageType.SYSTEM,
+                                    "Tap /new to start a fresh chat"
+                                ),
+                                activeTurnId = null,
+                                connectionStatus = "ready"
+                            )
+                        }
+                    } else {
+                        addError(errMsg)
+                        _uiState.update { it.copy(activeTurnId = null, connectionStatus = "error") }
+                    }
+                }
+                if (eventThreadId != null) {
+                    runningThreadIds.remove(eventThreadId)
+                    loadThreadList()
                 }
             }
             "item/started" -> {
@@ -562,6 +591,77 @@ class CodexViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
         }
+    }
+
+    fun loadWorkspaceTree(token: String, host: String? = null, port: String? = null) {
+        _uiState.update { it.copy(workspaceTreeLoading = true, workspacesError = null, error = null) }
+        viewModelScope.launch {
+            val h = host ?: _uiState.value.serverHost
+            val p = port ?: _uiState.value.serverPort
+            val baseUrl = "http://$h:$p"
+            repository.getWorkspaceTree(baseUrl, token)
+                .onSuccess { res: app.webcodex.codex.network.WorkspaceTreeResponse ->
+                    _uiState.update {
+                        it.copy(
+                            workspaceTree = res.tree,
+                            workspaces = listOf(WorkspaceOption(res.root.name, res.root.path)) +
+                                res.flat.map { n: app.webcodex.codex.network.WorkspaceFlatNode -> WorkspaceOption(n.name, n.path) },
+                            workspaceTreeLoading = false,
+                            workspacesError = null,
+                            serverHost = h,
+                            serverPort = p,
+                            connectStage = 2
+                        )
+                    }
+                    // persist host/port on successful validation
+                    settingsStore.updateSettings { it.copy(serverHost = h, serverPort = p) }
+                }
+                .onFailure { e: Throwable ->
+                    _uiState.update {
+                        it.copy(
+                            workspaceTree = emptyList(),
+                            workspaceTreeLoading = false,
+                            workspacesError = e.message ?: "Failed to load workspaces"
+                        )
+                    }
+                }
+        }
+    }
+
+    fun searchWorkspaces(token: String, query: String, host: String? = null, port: String? = null) {
+        if (query.isBlank()) {
+            _uiState.update { it.copy(workspaceSearchResults = emptyList(), workspacesSearched = false) }
+            return
+        }
+        viewModelScope.launch {
+            val h = host ?: _uiState.value.serverHost
+            val p = port ?: _uiState.value.serverPort
+            val baseUrl = "http://$h:$p"
+            repository.searchWorkspaces(baseUrl, token, query)
+                .onSuccess { res: app.webcodex.codex.network.WorkspaceSearchResponse ->
+                    _uiState.update {
+                        it.copy(
+                            workspaceSearchResults = res.results,
+                            workspacesSearched = true
+                        )
+                    }
+                }
+                .onFailure {
+                    _uiState.update { it.copy(workspaceSearchResults = emptyList(), workspacesSearched = false) }
+                }
+        }
+    }
+
+    // Stage navigation for connect screen
+    fun setConnectStage(stage: Int) = _uiState.update { it.copy(connectStage = stage) }
+    fun setWorkspaceSearchQuery(query: String) = _uiState.update { it.copy(workspaceSearchQuery = query) }
+    fun goToNextConnectStage() {
+        val current = _uiState.value.connectStage
+        if (current < 3) _uiState.update { it.copy(connectStage = current + 1) }
+    }
+    fun goToPrevConnectStage() {
+        val current = _uiState.value.connectStage
+        if (current > 1) _uiState.update { it.copy(connectStage = current - 1) }
     }
 
     fun sendMessage(text: String): Boolean {
@@ -1176,6 +1276,7 @@ class CodexViewModel(application: Application) : AndroidViewModel(application) {
                 isConnected = false,
                 activeTurnId = null,
                 connectionStatus = if (hasCache) "offline" else "disconnected",
+                connectStage = 1,
                 models = emptyList(),
                 pendingQueue = emptyList(),
                 itemTexts = emptyMap(),

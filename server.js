@@ -122,17 +122,78 @@ app.post("/session", requireAuth, (req, res) => {
   res.json({ sid, expiresAt });
 });
 
+const IGNORE_DIRS = new Set(["node_modules", ".git", ".cache", ".npm", "__pycache__", ".venv", "venv", "dist", "build", ".next", ".turbo", "target", "vendor", ".svn"]);
+
+function listDirTree(dirPath, depth = 3, currentDepth = 0) {
+  if (currentDepth > depth) return [];
+  try {
+    const entries = readdirSync(dirPath, { withFileTypes: true });
+    const children = entries
+      .filter(e => e.isDirectory() && !e.name.startsWith(".") && !IGNORE_DIRS.has(e.name))
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map(e => {
+        const fullPath = path.join(dirPath, e.name);
+        return {
+          name: e.name,
+          path: fullPath,
+          type: "dir",
+          children: currentDepth < depth ? listDirTree(fullPath, depth, currentDepth + 1) : [],
+        };
+      });
+    return children;
+  } catch {
+    return [];
+  }
+}
+
+function flattenTree(nodes, prefix = "") {
+  const result = [];
+  for (const n of nodes) {
+    result.push({ name: n.name, path: n.path, display: prefix + n.name });
+    result.push(...flattenTree(n.children, prefix + n.name + "/"));
+  }
+  return result;
+}
+
 // List immediate subdirectories of WORKSPACE_ROOT so the client can pick one.
 // Requires the same Bearer token auth as WebSocket.
 app.get("/workspaces", requireAuth, (req, res) => {
   try {
-    const IGNORE = new Set(["node_modules", ".git", ".cache", ".npm", "__pycache__"]);
     const entries = readdirSync(WORKSPACE_ROOT, { withFileTypes: true });
     const dirs = entries
-      .filter(e => e.isDirectory() && !e.name.startsWith(".") && !IGNORE.has(e.name))
+      .filter(e => e.isDirectory() && !e.name.startsWith(".") && !IGNORE_DIRS.has(e.name))
       .sort((a, b) => a.name.localeCompare(b.name))
       .map(e => ({ name: e.name, path: path.join(WORKSPACE_ROOT, e.name) }));
     res.json({ base: { name: path.basename(WORKSPACE_ROOT), path: WORKSPACE_ROOT }, dirs });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Recursive directory tree for the file picker.
+app.get("/workspaces/tree", requireAuth, (req, res) => {
+  try {
+    const depth = Math.min(Number(req.query.depth) || 4, 8);
+    const tree = listDirTree(WORKSPACE_ROOT, depth);
+    const flat = depth <= 2 ? [] : flattenTree(tree);
+    res.json({
+      root: { name: path.basename(WORKSPACE_ROOT), path: WORKSPACE_ROOT },
+      tree,
+      flat,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Search workspaces recursively.
+app.get("/workspaces/search", requireAuth, (req, res) => {
+  try {
+    const q = (req.query.q || "").toLowerCase().trim();
+    if (!q) return res.json({ results: [] });
+    const all = flattenTree(listDirTree(WORKSPACE_ROOT, 6));
+    const results = all.filter(n => n.name.toLowerCase().includes(q)).slice(0, 30);
+    res.json({ results });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

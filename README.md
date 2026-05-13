@@ -1,15 +1,15 @@
 # Cortex
 
-Cortex is a small remote UI for `codex app-server`.
+Cortex is a remote UI for `codex app-server`.
 
-I use it to drive Codex from a browser or Android device until Codex has first-party remote control.
+**The Android app is the primary client.** The web UI (`web/index.html`) is maintained as a secondary fallback.
 
 ## What it is
 
-- Browser UI in `web/index.html`
+- **Android client** (primary) in `android/` — Kotlin/Compose with full chat UI, session management, multi-session gestures, background service
 - Node/Express proxy in `server.js`
 - WebSocket bridge to `codex app-server`
-- Android client in `android/`
+- Browser UI (secondary) in `web/index.html`
 
 Server endpoints:
 

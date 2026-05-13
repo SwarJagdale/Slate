@@ -694,7 +694,7 @@ fun ChatScreen(
                         Icon(
                             if (uiState.isConnected) Icons.Default.PowerOff else Icons.Default.Wifi,
                             contentDescription = if (uiState.isConnected) "Disconnect" else "Reconnect",
-                            tint = c.muted
+                            tint = c.text2
                         )
                     }
                 }
@@ -864,27 +864,27 @@ fun ChatScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(c.surface)
-                .padding(start = 12.dp, end = 12.dp, top = 10.dp, bottom = 6.dp)
+                .padding(start = 12.dp, end = 8.dp, top = 8.dp, bottom = 4.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.Bottom,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 OutlinedTextField(
                     value = input,
                     onValueChange = { input = it },
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.weight(1f).heightIn(min = 44.dp),
                     enabled = !isOfflineReadOnly,
                     placeholder = {
                         Text(
-	                            if (isOfflineReadOnly) "Offline cache is read-only" else "Message Cortex… (/ for commands)",
+                            if (isOfflineReadOnly) "Offline cache is read-only" else "Message Cortex… (/ for commands)",
                             color = c.muted,
                             style = MaterialTheme.typography.bodyMedium
                         )
                     },
                     maxLines = 5,
-                    shape = RoundedCornerShape(radius.medium),
+                    shape = RoundedCornerShape(12.dp),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = c.accent,
                         unfocusedBorderColor = c.border,
@@ -932,19 +932,20 @@ fun ChatScreen(
 
             // Hint + status bar
             Row(
-                modifier = Modifier.fillMaxWidth().padding(top = 5.dp),
+                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Text(
                     if (isOfflineReadOnly) "Reconnect to continue chatting" else "Enter to send · Shift+Enter for new line",
                     style = MaterialTheme.typography.labelSmall,
-                    color = c.muted
+                    color = c.muted,
+                    modifier = Modifier.padding(end = 8.dp)
                 )
                 // Token usage + rate limit bar
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     uiState.tokenUsage?.let { u ->
                         Text(
@@ -961,8 +962,8 @@ fun ChatScreen(
                         // Bar
                         Box(
                             modifier = Modifier
-                                .width(64.dp)
-                                .height(3.dp)
+                                .width(56.dp)
+                                .height(4.dp)
                                 .clip(RoundedCornerShape(2.dp))
                                 .background(c.surface2)
                         ) {

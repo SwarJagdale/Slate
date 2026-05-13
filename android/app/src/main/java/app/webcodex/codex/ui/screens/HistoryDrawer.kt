@@ -17,6 +17,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import app.webcodex.codex.ui.ActiveSession
 import app.webcodex.codex.ui.CodexViewModel
+import app.webcodex.codex.ui.ThreadSummary
 import app.webcodex.codex.ui.theme.LocalCodexColors
 
 // ═══════════════════════════════════════════════════════════════
@@ -174,58 +175,79 @@ fun HistoryDrawerContent(
 
         Spacer(Modifier.height(4.dp))
 
-        // Thread list
+        // Thread list — grouped by workspace
+        val groupedThreads = remember(filteredThreads) {
+            val byCwd = filteredThreads.groupBy { it.cwd ?: "" }
+            byCwd.entries.sortedByDescending { (_, threads) -> threads.maxOf { it.updatedAt } }
+                .flatMap { (cwd, threads) ->
+                    val sorted = threads.sortedByDescending { it.updatedAt }
+                    val label = cwd.substringAfterLast('/').ifEmpty { cwd.ifEmpty { "Default" } }
+                    listOf(null to label) + sorted.map { it.id to it }
+                }
+        }
+
         LazyColumn(
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(0.dp)
         ) {
-            items(filteredThreads) { t ->
-                val isActive = t.id == uiState.threadId
-                val session = activeSessionsMap[t.id]
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable {
-                            viewModel.resumeThread(t.id)
-                            onDismiss()
-                        }
-                        .padding(0.dp, 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    // Active thread rail highlight
-                    Box(
-                        modifier = Modifier
-                            .width(3.dp)
-                            .heightIn(min = 40.dp)
-                            .background(
-                                if (isActive) c.accent
-                                else androidx.compose.ui.graphics.Color.Transparent
-                            )
+            items(groupedThreads) { (idOrNull, item) ->
+                if (idOrNull == null) {
+                    // Section header
+                    Text(
+                        item as String,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = c.muted,
+                        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 14.dp)
                     )
-                    Column(
+                } else {
+                    val t = item as ThreadSummary
+                    val isActive = t.id == uiState.threadId
+                    val session = activeSessionsMap[t.id]
+                    Row(
                         modifier = Modifier
-                            .weight(1f)
-                            .padding(horizontal = 14.dp, vertical = 6.dp)
+                            .fillMaxWidth()
+                            .clickable {
+                                viewModel.resumeThread(t.id)
+                                onDismiss()
+                            }
+                            .padding(0.dp, 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        // Active thread rail highlight
+                        Box(
+                            modifier = Modifier
+                                .width(3.dp)
+                                .heightIn(min = 40.dp)
+                                .background(
+                                    if (isActive) c.accent
+                                    else androidx.compose.ui.graphics.Color.Transparent
+                                )
+                        )
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(horizontal = 14.dp, vertical = 6.dp)
                         ) {
-                            // Status dot
-                            SessionStatusDot(session = session)
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                // Status dot
+                                SessionStatusDot(session = session)
+                                Text(
+                                    t.preview.take(60) + if (t.preview.length > 60) "…" else "",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = if (isActive) c.accent else c.text,
+                                    maxLines = 1
+                                )
+                            }
                             Text(
-                                t.preview.take(60) + if (t.preview.length > 60) "…" else "",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = if (isActive) c.accent else c.text,
-                                maxLines = 1
+                                java.text.SimpleDateFormat("MMM d, h:mm", java.util.Locale.getDefault())
+                                    .format(java.util.Date(t.updatedAt * 1000)),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = c.muted
                             )
                         }
-                        Text(
-                            java.text.SimpleDateFormat("MMM d, h:mm", java.util.Locale.getDefault())
-                                .format(java.util.Date(t.updatedAt * 1000)),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = c.muted
-                        )
                     }
                 }
             }
@@ -257,68 +279,90 @@ private fun NewChatModal(
     var selectedWorkspace by remember(uiState.workspaces, uiState.workspacePath) {
         mutableStateOf(uiState.workspacePath ?: uiState.workspaces.firstOrNull()?.path ?: "")
     }
+    var selectedModel by remember { mutableStateOf(uiState.settings.model) }
+    var selectedSandbox by remember { mutableStateOf(uiState.settings.sandbox) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("New chat") },
         text = {
-            Column {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                // Workspace
                 if (uiState.workspaces.isNotEmpty()) {
                     var expanded by remember { mutableStateOf(false) }
-                    Text(
-                        "Workspace",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(Modifier.height(6.dp))
-                    ExposedDropdownMenuBox(
-                        expanded = expanded,
-                        onExpandedChange = { expanded = it },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
+                    Text("Workspace", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }, modifier = Modifier.fillMaxWidth()) {
                         OutlinedTextField(
                             value = uiState.workspaces.firstOrNull { it.path == selectedWorkspace }?.name
-                                ?: selectedWorkspace.substringAfterLast('/').ifEmpty { "Default workspace" },
+                                ?: selectedWorkspace.substringAfterLast('/').ifEmpty { "Current" },
                             onValueChange = {},
                             readOnly = true,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .menuAnchor(),
+                            modifier = Modifier.fillMaxWidth().menuAnchor(),
                             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
                             singleLine = true
                         )
                         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
                             uiState.workspaces.forEach { opt ->
                                 DropdownMenuItem(
-                                    text = {
-                                        Column {
-                                            Text(opt.name, style = MaterialTheme.typography.bodyMedium)
-                                            Text(
-                                                opt.path,
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        }
-                                    },
-                                    onClick = {
-                                        selectedWorkspace = opt.path
-                                        expanded = false
-                                    }
+                                    text = { Column { Text(opt.name); Text(opt.path, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) } },
+                                    onClick = { selectedWorkspace = opt.path; expanded = false }
                                 )
                             }
                         }
                     }
                 } else {
-                    Text(
-                        "A new chat will be started in the current workspace.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    Text("A new chat will be started in the current workspace.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+
+                // Model
+                Text("Model", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                var modelExpanded by remember { mutableStateOf(false) }
+                val modelOptions = listOf("" to "Default") + uiState.models.map { it.value to it.label }
+                ExposedDropdownMenuBox(expanded = modelExpanded, onExpandedChange = { modelExpanded = it }, modifier = Modifier.fillMaxWidth()) {
+                    OutlinedTextField(
+                        value = modelOptions.firstOrNull { it.first == selectedModel }?.second ?: "Default",
+                        onValueChange = {},
+                        readOnly = true,
+                        modifier = Modifier.fillMaxWidth().menuAnchor(),
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = modelExpanded) },
+                        singleLine = true
                     )
+                    ExposedDropdownMenu(expanded = modelExpanded, onDismissRequest = { modelExpanded = false }) {
+                        modelOptions.forEach { (value, label) ->
+                            DropdownMenuItem(text = { Text(label) }, onClick = { selectedModel = value; modelExpanded = false })
+                        }
+                    }
+                }
+
+                // Sandbox
+                Text("Sandbox", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                var sandboxExpanded by remember { mutableStateOf(false) }
+                val sandboxOptions = listOf("workspaceWrite" to "Workspace Write", "readOnly" to "Read Only", "dangerFullAccess" to "Danger Full Access")
+                ExposedDropdownMenuBox(expanded = sandboxExpanded, onExpandedChange = { sandboxExpanded = it }, modifier = Modifier.fillMaxWidth()) {
+                    OutlinedTextField(
+                        value = sandboxOptions.firstOrNull { it.first == selectedSandbox }?.second ?: selectedSandbox,
+                        onValueChange = {},
+                        readOnly = true,
+                        modifier = Modifier.fillMaxWidth().menuAnchor(),
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = sandboxExpanded) },
+                        singleLine = true
+                    )
+                    ExposedDropdownMenu(expanded = sandboxExpanded, onDismissRequest = { sandboxExpanded = false }) {
+                        sandboxOptions.forEach { (value, label) ->
+                            DropdownMenuItem(text = { Text(label) }, onClick = { selectedSandbox = value; sandboxExpanded = false })
+                        }
+                    }
                 }
             }
         },
         confirmButton = {
-            Button(onClick = { onStart(selectedWorkspace.ifBlank { null }) }) { Text("Start") }
+            Button(onClick = {
+                // Apply model/sandbox before starting
+                if (selectedModel != uiState.settings.model || selectedSandbox != uiState.settings.sandbox) {
+                    viewModel.updateSettings { it.copy(model = selectedModel, sandbox = selectedSandbox) }
+                }
+                onStart(selectedWorkspace.ifBlank { null })
+            }) { Text("Start") }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Cancel") }
