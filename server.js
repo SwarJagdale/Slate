@@ -4,14 +4,18 @@ import rateLimit from "express-rate-limit";
 import { WebSocketServer } from "ws";
 import { randomUUID, timingSafeEqual, createHash } from "crypto";
 import { spawn } from "child_process";
-import { readFileSync, readdirSync, createWriteStream, statSync } from "fs";
+import { readFileSync, readdirSync, createWriteStream, statSync, existsSync } from "fs";
+import { homedir } from "os";
 import path from "path";
 import process from "process";
 
 const PORT = Number(process.env.PORT || 3000);
+const HOST = process.env.HOST || "0.0.0.0";
 const [APP_SERVER_CMD, ...APP_SERVER_CMD_EXTRA] = (process.env.CODEX_APP_SERVER_CMD || "codex app-server").split(" ").filter(Boolean);
 const APP_SERVER_ARGS = [...APP_SERVER_CMD_EXTRA, ...(process.env.CODEX_APP_SERVER_ARGS || "").split(" ").filter(Boolean)];
-const WORKSPACE_ROOT = path.resolve(process.env.WORKSPACE_ROOT || process.cwd());
+const WORKSPACE_ROOT = path.resolve(
+  (process.env.WORKSPACE_ROOT || process.cwd()).replace(/^~(?=$|\/)/, homedir())
+);
 const AUTH_TOKEN = process.env.WEBAPP_AUTH_TOKEN || "";
 const MAX_MSG_BYTES = Number(process.env.MAX_MSG_BYTES || 256_000);
 const MAX_QUEUE = Number(process.env.MAX_QUEUE || 200);
@@ -140,9 +144,9 @@ app.get("/", (req, res) => {
   res.send(html);
 });
 
-const server = app.listen(PORT, () => {
-  log(`Listening on http://localhost:${PORT}`);
-  log(`Workspace hash: ${hashWorkspaceRoot(WORKSPACE_ROOT)}`);
+const server = app.listen(PORT, HOST, () => {
+  log(`Listening on http://${HOST}:${PORT}`);
+  log(`Workspace root: ${WORKSPACE_ROOT} ${existsSync(WORKSPACE_ROOT) ? "✓" : "✗ NOT FOUND"}`);
   log(`Auth token configured: ${AUTH_TOKEN ? "yes" : "NO — set WEBAPP_AUTH_TOKEN"}`);
   log(`App server command: ${APP_SERVER_CMD} ${APP_SERVER_ARGS.join(" ")}`);
   log(`Session log: ${ENABLE_SESSION_LOG ? LOG_FILE : "disabled (set SESSION_LOG=1)"}`);

@@ -61,6 +61,8 @@ data class CodexUiState(
     val pendingQueue: List<String> = emptyList(),
     val threadList: List<ThreadSummary> = emptyList(),
     val workspaces: List<WorkspaceOption> = emptyList(),
+    val workspacesLoading: Boolean = false,
+    val workspacesError: String? = null,
     val models: List<ModelOption> = emptyList(),
     val settings: AppSettings = AppSettings("", "", "on-request", "workspaceWrite", "10.0.2.2", "3000"),
     val tokenUsage: TokenUsage? = null,
@@ -225,7 +227,7 @@ class CodexViewModel(application: Application) : AndroidViewModel(application) {
             host = settings.serverHost,
             port = settings.serverPort,
             token = savedToken,
-            workspace = _uiState.value.workspacePath,
+            workspace = null,
             rememberToken = true
         )
     }
@@ -529,15 +531,36 @@ class CodexViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun loadWorkspaces(token: String, host: String? = null, port: String? = null) {
+        _uiState.update { it.copy(workspacesLoading = true, workspacesError = null, error = null) }
         viewModelScope.launch {
             val h = host ?: _uiState.value.serverHost
             val p = port ?: _uiState.value.serverPort
             val baseUrl = "http://$h:$p"
-            repository.getWorkspaces(baseUrl, token).onSuccess { res ->
-                val list = listOf(WorkspaceOption("${res.base.name}/ (root)", res.base.path)) +
-                    res.dirs.map { WorkspaceOption("${it.name}/", it.path) }
-                _uiState.update { it.copy(workspaces = list) }
-            }
+            repository.getWorkspaces(baseUrl, token)
+                .onSuccess { res ->
+                    val list = listOf(WorkspaceOption(res.base.name, res.base.path)) +
+                        res.dirs.map { WorkspaceOption(it.name, it.path) }
+                    val currentWs = _uiState.value.workspacePath
+                    val valid = currentWs != null && list.any { it.path == currentWs }
+                    _uiState.update {
+                        it.copy(
+                            workspaces = list,
+                            workspacePath = if (valid) currentWs else null,
+                            workspacesLoading = false,
+                            workspacesError = null
+                        )
+                    }
+                }
+                .onFailure { e ->
+                    _uiState.update {
+                        it.copy(
+                            workspaces = emptyList(),
+                            workspacePath = null,
+                            workspacesLoading = false,
+                            workspacesError = e.message ?: "Failed to load workspaces"
+                        )
+                    }
+                }
         }
     }
 
@@ -1090,7 +1113,7 @@ class CodexViewModel(application: Application) : AndroidViewModel(application) {
     fun resumeOfflineCache() = _uiState.update {
         if (it.hasOfflineCache) it.copy(preferOfflineHome = true, connectionStatus = "offline", error = null) else it
     }
-    fun clearError() = _uiState.update { it.copy(error = null) }
+    fun clearError() = _uiState.update { it.copy(error = null, workspacesError = null) }
     fun toggleSettings() = _uiState.update { it.copy(showSettings = !it.showSettings) }
     fun toggleHistory() = _uiState.update { it.copy(showHistory = !it.showHistory) }
     fun setShowHistory(show: Boolean) = _uiState.update { it.copy(showHistory = show) }
