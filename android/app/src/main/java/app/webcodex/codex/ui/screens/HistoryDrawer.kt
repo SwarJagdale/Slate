@@ -119,45 +119,6 @@ fun HistoryDrawerContent(
         )
         Spacer(Modifier.height(8.dp))
 
-        // Workspace filter
-        var wsExpanded by remember { mutableStateOf(false) }
-        val wsOptions = listOf("" to "All workspaces") + uiState.workspaces.map { it.path to it.name }
-        ExposedDropdownMenuBox(
-            expanded = wsExpanded,
-            onExpandedChange = { wsExpanded = it },
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp)
-        ) {
-            OutlinedTextField(
-                value = wsOptions.firstOrNull { it.first == (uiState.historyWorkspaceFilter ?: "") }?.second ?: "All workspaces",
-                onValueChange = {},
-                readOnly = true,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .menuAnchor(),
-                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = wsExpanded) },
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = c.accent,
-                    unfocusedBorderColor = c.border,
-                    focusedTextColor = c.text,
-                    unfocusedTextColor = c.text
-                )
-            )
-            ExposedDropdownMenu(expanded = wsExpanded, onDismissRequest = { wsExpanded = false }) {
-                wsOptions.forEach { (path, name) ->
-                    DropdownMenuItem(
-                        text = { Text(name) },
-                        onClick = {
-                            viewModel.setHistoryWorkspaceFilter(path.takeIf { it.isNotEmpty() })
-                            wsExpanded = false
-                        }
-                    )
-                }
-            }
-        }
-        Spacer(Modifier.height(4.dp))
-
         // Include archived
         Row(
             modifier = Modifier
@@ -175,14 +136,24 @@ fun HistoryDrawerContent(
 
         Spacer(Modifier.height(4.dp))
 
-        // Thread list — grouped by workspace
-        val groupedThreads = remember(filteredThreads) {
+        // Collapsed groups state + toggle counter forces recomputation
+        val collapsedGroups = remember { mutableStateMapOf<String, Boolean>() }
+        var collapseVer by remember { mutableStateOf(0) }
+
+        // Thread list — grouped by workspace, collapsible
+        val groupedData = remember(filteredThreads, collapseVer) {
             val byCwd = filteredThreads.groupBy { it.cwd ?: "" }
-            byCwd.entries.sortedByDescending { (_, threads) -> threads.maxOf { it.updatedAt } }
+            byCwd.entries
+                .sortedByDescending { (_, threads) -> threads.maxOf { it.updatedAt } }
                 .flatMap { (cwd, threads) ->
                     val sorted = threads.sortedByDescending { it.updatedAt }
                     val label = cwd.substringAfterLast('/').ifEmpty { cwd.ifEmpty { "Default" } }
-                    listOf(null to label) + sorted.map { it.id to it }
+                    val isCollapsed = collapsedGroups[cwd] == true
+                    val items: MutableList<Pair<String?, Any?>> = mutableListOf(cwd to (label as Any?))
+                    if (!isCollapsed) {
+                        sorted.forEach { t -> items.add(t.id to t) }
+                    }
+                    items
                 }
         }
 
@@ -190,15 +161,29 @@ fun HistoryDrawerContent(
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(0.dp)
         ) {
-            items(groupedThreads) { (idOrNull, item) ->
-                if (idOrNull == null) {
-                    // Section header
-                    Text(
-                        item as String,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = c.muted,
-                        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 14.dp)
-                    )
+            items(groupedData, key = { it.first ?: "h_${it.second}" }) { (key, item) ->
+                if (key is String && item is String) {
+                    // Section header — workspace name, larger than chat titles
+                    val cwd = key
+                    val label = item
+                    val isCollapsed = collapsedGroups[cwd] == true
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { collapsedGroups[cwd] = !isCollapsed; collapseVer++ }
+                            .background(c.surface)
+                            .padding(start = 12.dp, end = 16.dp, top = 12.dp, bottom = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            if (isCollapsed) "▶" else "▼",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = c.muted,
+                            modifier = Modifier.width(12.dp)
+                        )
+                        Text(label, style = MaterialTheme.typography.titleSmall, color = c.text)
+                    }
                 } else {
                     val t = item as ThreadSummary
                     val isActive = t.id == uiState.threadId
@@ -213,7 +198,6 @@ fun HistoryDrawerContent(
                             .padding(0.dp, 4.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // Active thread rail highlight
                         Box(
                             modifier = Modifier
                                 .width(3.dp)
@@ -232,7 +216,6 @@ fun HistoryDrawerContent(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                // Status dot
                                 SessionStatusDot(session = session)
                                 Text(
                                     t.preview.take(60) + if (t.preview.length > 60) "…" else "",
@@ -276,8 +259,8 @@ private fun NewChatModal(
     onStart: (workspacePath: String?) -> Unit
 ) {
     val uiState by viewModel.uiState.collectAsState()
-    var selectedWorkspace by remember(uiState.workspaces, uiState.workspacePath) {
-        mutableStateOf(uiState.workspacePath ?: uiState.workspaces.firstOrNull()?.path ?: "")
+    var selectedWorkspace by remember(uiState.workspaceTree, uiState.workspacePath) {
+        mutableStateOf(uiState.workspacePath ?: uiState.workspaceTree.firstOrNull()?.path ?: "")
     }
     var selectedModel by remember { mutableStateOf(uiState.settings.model) }
     var selectedSandbox by remember { mutableStateOf(uiState.settings.sandbox) }
@@ -287,14 +270,15 @@ private fun NewChatModal(
         title = { Text("New chat") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                // Workspace
-                if (uiState.workspaces.isNotEmpty()) {
+                // Workspace — top-level dirs only
+                if (uiState.workspaceTree.isNotEmpty()) {
                     var expanded by remember { mutableStateOf(false) }
                     Text("Workspace", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }, modifier = Modifier.fillMaxWidth()) {
+                        val displayName = uiState.workspaceTree.firstOrNull { it.path == selectedWorkspace }?.name
+                            ?: selectedWorkspace.substringAfterLast('/').ifEmpty { "Current" }
                         OutlinedTextField(
-                            value = uiState.workspaces.firstOrNull { it.path == selectedWorkspace }?.name
-                                ?: selectedWorkspace.substringAfterLast('/').ifEmpty { "Current" },
+                            value = displayName,
                             onValueChange = {},
                             readOnly = true,
                             modifier = Modifier.fillMaxWidth().menuAnchor(),
@@ -302,10 +286,10 @@ private fun NewChatModal(
                             singleLine = true
                         )
                         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                            uiState.workspaces.forEach { opt ->
+                            uiState.workspaceTree.forEach { node ->
                                 DropdownMenuItem(
-                                    text = { Column { Text(opt.name); Text(opt.path, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) } },
-                                    onClick = { selectedWorkspace = opt.path; expanded = false }
+                                    text = { Column { Text(node.name); Text(node.path, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) } },
+                                    onClick = { selectedWorkspace = node.path; expanded = false }
                                 )
                             }
                         }

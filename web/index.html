@@ -4521,8 +4521,9 @@
         container.innerHTML = '<div class="ws-tree-empty">No workspaces found</div>';
         return;
       }
+      var html = '';
       // Breadcrumb
-      let html = '<div class="ws-breadcrumb">';
+      html += '<div class="ws-breadcrumb">';
       workspaceBreadcrumb.forEach((cr, i) => {
         if (i > 0) html += '<span class="ws-bc-sep">/</span>';
         if (i < workspaceBreadcrumb.length - 1) {
@@ -4532,17 +4533,22 @@
         }
       });
       html += '</div>';
+      // Select current folder
+      if (workspaceBreadcrumb.length > 1) {
+        const cur = workspaceBreadcrumb[workspaceBreadcrumb.length - 1];
+        const sel = cur.path === selectedWorkspacePath ? ' selected' : '';
+        html += `<div class="ws-tree-item${sel}" data-select-current="${h(cur.path)}"><span class="ws-icon">✓</span><span style="color:var(--accent)">Select &quot;${h(cur.name)}&quot;</span></div>`;
+      }
       // Up link
       if (workspaceBreadcrumb.length > 1) {
         html += '<div class="ws-tree-item ws-up-item" data-up><span class="ws-icon">←</span><span>..</span></div>';
       }
-      // Entries
       for (const node of nodes) {
         const hasChildren = node.children && node.children.length > 0;
-        const sel = (node.path === selectedWorkspacePath || node.path === (selectedWorkspacePath || '')) ? ' selected' : '';
+        const sel = (node.path === selectedWorkspacePath) ? ' selected' : '';
         html += `<div class="ws-tree-item${sel}" data-path="${h(node.path)}" data-name="${h(node.name)}" data-has-children="${hasChildren}">`;
         html += `<span class="ws-icon">${hasChildren ? '📂' : '📄'}</span>`;
-        html += `<span class="ws-label">${h(node.name)}</span>`;
+        html += `<span>${h(node.name)}</span>`;
         const parts = node.path.split('/');
         if (parts.length > 2) html += `<span class="ws-path">…/${h(parts.slice(-2).join('/'))}</span>`;
         if (sel) html += '<span class="ws-check">✓</span>';
@@ -4550,7 +4556,7 @@
       }
       container.innerHTML = html;
 
-      // Click handlers
+      // Event listeners
       container.querySelectorAll('.ws-bc-link').forEach(a => {
         a.addEventListener('click', (e) => {
           e.preventDefault();
@@ -4558,12 +4564,17 @@
           renderWorkspaceTree(container);
         });
       });
+      container.querySelector('[data-select-current]')?.addEventListener('click', () => {
+        const path = container.querySelector('[data-select-current]').dataset.selectCurrent;
+        selectWorkspace(path);
+        renderWorkspaceTree(container);
+      });
       container.querySelector('.ws-up-item')?.addEventListener('click', () => {
         workspaceBreadcrumb = workspaceBreadcrumb.slice(0, -1);
         renderWorkspaceTree(container);
       });
       container.querySelectorAll('.ws-tree-item[data-has-children]').forEach(item => {
-        item.addEventListener('click', (e) => {
+        item.addEventListener('click', () => {
           if (item.dataset.hasChildren === 'true') {
             workspaceBreadcrumb.push({ name: item.dataset.name, path: item.dataset.path });
             renderWorkspaceTree(container);

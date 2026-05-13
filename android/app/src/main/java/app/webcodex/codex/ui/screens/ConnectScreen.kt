@@ -219,7 +219,7 @@ fun ConnectScreen(
             }
         }
 
-        // ── Stage 2: Workspace Browser (flat directory navigation) ──────
+        // ── Stage 2: Workspace Picker ──────────────────
         AnimatedVisibility(visible = currentStage == 2, enter = fadeIn(), exit = fadeOut()) {
             Column {
                 // Search
@@ -241,7 +241,7 @@ fun ConnectScreen(
                 )
 
                 if (showSearchResults && uiState.workspaceSearchResults.isNotEmpty()) {
-                    // Search results (flat list, same as before)
+                    // Search results
                     Surface(
                         modifier = Modifier.fillMaxWidth().heightIn(max = 280.dp),
                         shape = RoundedCornerShape(8.dp),
@@ -250,37 +250,16 @@ fun ConnectScreen(
                     ) {
                         LazyColumn(modifier = Modifier.padding(vertical = 4.dp)) {
                             items(uiState.workspaceSearchResults) { node ->
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable {
-                                            selectedWsPath = node.path
-                                            viewModel.setWorkspacePath(node.path)
-                                            showSearchResults = false
-                                        }
-                                        .background(
-                                            if (node.path == selectedWsPath || node.path == uiState.workspacePath)
-                                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
-                                            else androidx.compose.ui.graphics.Color.Transparent
-                                        )
-                                        .padding(horizontal = 12.dp, vertical = 10.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Icon(Icons.Default.Folder, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(node.display.substringAfterLast('/'), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
-                                        Text(node.path, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    }
-                                    if (node.path == selectedWsPath || node.path == uiState.workspacePath) {
-                                        Icon(Icons.Default.CheckCircle, contentDescription = "Selected", tint = c.accent, modifier = Modifier.size(16.dp))
-                                    }
+                                WorkspaceOptionRow(node.path, node.display.substringAfterLast('/'), node.path, selectedWsPath, uiState.workspacePath, c) {
+                                    selectedWsPath = node.path
+                                    viewModel.setWorkspacePath(node.path)
+                                    showSearchResults = false
                                 }
                             }
                         }
                     }
-                } else if (!showSearchResults) {
-                    // Flat directory browser — breadcrumb navigation
+                } else {
+                    // Directory browser — shows top-level dirs, navigate in by tapping
                     Surface(
                         modifier = Modifier.fillMaxWidth().heightIn(max = 320.dp),
                         shape = RoundedCornerShape(8.dp),
@@ -297,7 +276,6 @@ fun ConnectScreen(
                             }
                         } else {
                             Column {
-                                // Breadcrumb trail
                                 Row(
                                     modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
                                     verticalAlignment = Alignment.CenterVertically,
@@ -317,14 +295,40 @@ fun ConnectScreen(
                                 }
                                 HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
                                 LazyColumn(modifier = Modifier.padding(vertical = 4.dp)) {
-                                    // ".." entry when not at root
+                                    // Select current folder button
                                     if (breadcrumb.size > 1) {
                                         item {
+                                            val currentPath = breadcrumb.last().second
+                                            val currentName = breadcrumb.last().first
                                             Row(
                                                 modifier = Modifier
                                                     .fillMaxWidth()
-                                                    .clickable { breadcrumb = breadcrumb.dropLast(1) }
-                                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                                                    .clickable {
+                                                        selectedWsPath = currentPath
+                                                        viewModel.setWorkspacePath(currentPath)
+                                                    }
+                                                    .background(
+                                                        if (currentPath == selectedWsPath || currentPath == uiState.workspacePath)
+                                                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+                                                        else androidx.compose.ui.graphics.Color.Transparent
+                                                    )
+                                                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                            ) {
+                                                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = c.accent, modifier = Modifier.size(16.dp))
+                                                Column(modifier = Modifier.weight(1f)) {
+                                                    Text("Select \"$currentName\"", style = MaterialTheme.typography.bodyMedium, color = c.accent)
+                                                    Text(currentPath, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                                                }
+                                            }
+                                        }
+                                    }
+                                    // Back
+                                    if (breadcrumb.size > 1) {
+                                        item {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth().clickable { breadcrumb = breadcrumb.dropLast(1) }.padding(horizontal = 12.dp, vertical = 8.dp),
                                                 verticalAlignment = Alignment.CenterVertically,
                                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                                             ) {
@@ -334,38 +338,12 @@ fun ConnectScreen(
                                         }
                                     }
                                     items(currentDirNodes) { node ->
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .clickable {
-                                                    if (node.children.isNotEmpty()) {
-                                                        breadcrumb = breadcrumb + (node.name to node.path)
-                                                    } else {
-                                                        selectedWsPath = node.path
-                                                        viewModel.setWorkspacePath(node.path)
-                                                    }
-                                                }
-                                                .background(
-                                                    if (node.path == selectedWsPath || node.path == uiState.workspacePath)
-                                                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
-                                                    else androidx.compose.ui.graphics.Color.Transparent
-                                                )
-                                                .padding(horizontal = 12.dp, vertical = 10.dp),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                        ) {
-                                            Icon(
-                                                Icons.Default.Folder,
-                                                contentDescription = null,
-                                                tint = if (node.children.isNotEmpty()) c.accent else MaterialTheme.colorScheme.onSurfaceVariant,
-                                                modifier = Modifier.size(16.dp)
-                                            )
-                                            Column(modifier = Modifier.weight(1f)) {
-                                                Text(node.name, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
-                                                Text(node.path, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
-                                            }
-                                            if (node.path == selectedWsPath || node.path == uiState.workspacePath) {
-                                                Icon(Icons.Default.CheckCircle, contentDescription = "Selected", tint = c.accent, modifier = Modifier.size(16.dp))
+                                        WorkspaceOptionRow(node.path, node.name, node.path, selectedWsPath, uiState.workspacePath, c) {
+                                            if (node.children.isNotEmpty()) {
+                                                breadcrumb = breadcrumb + (node.name to node.path)
+                                            } else {
+                                                selectedWsPath = node.path
+                                                viewModel.setWorkspacePath(node.path)
                                             }
                                         }
                                     }
@@ -541,6 +519,40 @@ fun ConnectScreen(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun WorkspaceOptionRow(
+    path: String,
+    name: String,
+    displayPath: String,
+    selectedWsPath: String,
+    wsPath: String?,
+    c: app.webcodex.codex.ui.theme.CodexColors,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .background(
+                if (path == selectedWsPath || path == wsPath)
+                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+                else androidx.compose.ui.graphics.Color.Transparent
+            )
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Icon(Icons.Default.Folder, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(name, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
+            Text(displayPath, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+        }
+        if (path == selectedWsPath || path == wsPath) {
+            Icon(Icons.Default.CheckCircle, contentDescription = "Selected", tint = c.accent, modifier = Modifier.size(16.dp))
         }
     }
 }
