@@ -576,127 +576,116 @@ fun ChatScreen(
 
         // ─── Header ───────────────────────────────────────────────────────────
         TopAppBar(
+            navigationIcon = {
+                // Brand icon — tapping opens the history drawer
+                IconButton(onClick = { viewModel.toggleHistory() }) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_codex_brand),
+                        contentDescription = "History",
+                        tint = c.accent,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            },
             title = {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    // Brand
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(7.dp)
+                // Model picker pill (only when connected and models loaded)
+                if (uiState.isConnected && uiState.models.isNotEmpty()) {
+                    var modelExpanded by remember { mutableStateOf(false) }
+                    ExposedDropdownMenuBox(
+                        expanded = modelExpanded,
+                        onExpandedChange = { modelExpanded = it }
                     ) {
-                        Icon(
-                            painter = painterResource(R.drawable.ic_codex_brand),
-                            contentDescription = null,
-                            tint = c.accent,
-                            modifier = Modifier.size(17.dp)
-                        )
-                        Text(
-                            "Cortex",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = c.accent
-                        )
-                    }
-
-                    // Model picker (pill)
-                    if (uiState.isConnected && uiState.models.isNotEmpty()) {
-                        Spacer(Modifier.width(10.dp))
-                        var modelExpanded by remember { mutableStateOf(false) }
-                        ExposedDropdownMenuBox(
-                            expanded = modelExpanded,
-                            onExpandedChange = { modelExpanded = it }
+                        Surface(
+                            modifier = Modifier
+                                .widthIn(min = 60.dp, max = 160.dp)
+                                .menuAnchor()
+                                .clickable { modelExpanded = true },
+                            shape = RoundedCornerShape(20.dp),
+                            color = c.surface2,
+                            border = BorderStroke(1.dp, c.border)
                         ) {
-                            Surface(
-                                modifier = Modifier
-                                    .widthIn(max = 200.dp)
-                                    .menuAnchor()
-                                    .clickable { modelExpanded = true },
-                                shape = RoundedCornerShape(20.dp),
-                                color = c.surface2,
-                                border = BorderStroke(1.dp, c.border)
-                            ) {
-                                Text(
-                                    uiState.models.firstOrNull { it.value == uiState.settings.model }?.label
-                                        ?: uiState.settings.model.ifEmpty { "Default" },
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = c.text2,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                            ExposedDropdownMenu(
-                                expanded = modelExpanded,
-                                onDismissRequest = { modelExpanded = false }
-                            ) {
+                            Text(
+                                uiState.models.firstOrNull { it.value == uiState.settings.model }?.label
+                                    ?: uiState.settings.model.ifEmpty { "Default" },
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = c.text2,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        ExposedDropdownMenu(
+                            expanded = modelExpanded,
+                            onDismissRequest = { modelExpanded = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Default") },
+                                onClick = {
+                                    viewModel.updateSettings { it.copy(model = "") }
+                                    modelExpanded = false
+                                }
+                            )
+                            uiState.models.forEach { opt ->
                                 DropdownMenuItem(
-                                    text = { Text("Default") },
+                                    text = { Text(opt.label) },
                                     onClick = {
-                                        viewModel.updateSettings { it.copy(model = "") }
+                                        viewModel.updateSettings { it.copy(model = opt.value) }
                                         modelExpanded = false
                                     }
                                 )
-                                uiState.models.forEach { opt ->
-                                    DropdownMenuItem(
-                                        text = { Text(opt.label) },
-                                        onClick = {
-                                            viewModel.updateSettings { it.copy(model = opt.value) }
-                                            modelExpanded = false
-                                        }
-                                    )
-                                }
                             }
                         }
                     }
-
-                    Spacer(Modifier.weight(1f))
-
-                    // Status pill
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                } else {
+                    // No model loaded yet — show app name
+                    Text(
+                        "Cortex",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = c.accent
+                    )
+                }
+            },
+            actions = {
+                // Status pill
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(c.surface2)
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                ) {
+                    Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(20.dp))
-                            .background(c.surface2)
-                            .padding(horizontal = 8.dp, vertical = 4.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(7.dp)
-                                .clip(CircleShape)
-                                .background(
-                                    when (uiState.connectionStatus) {
-                                        "ready" -> c.green
-                                        "error", "disconnected" -> c.red
-                                        "working" -> c.yellow
-                                        else -> c.muted
-                                    }
-                                )
-                        )
-                        Text(
-                            uiState.connectionStatus,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = c.text2
-                        )
-                    }
-                    Spacer(Modifier.width(4.dp))
-
-                    IconButton(onClick = { viewModel.toggleHistory() }) {
-                        Icon(Icons.Default.Chat, contentDescription = "History", tint = c.text2)
-                    }
-                    IconButton(onClick = { viewModel.toggleSettings() }) {
-                        Icon(Icons.Default.Settings, contentDescription = "Settings", tint = c.text2)
-                    }
-                    IconButton(onClick = {
-                        if (uiState.isConnected) viewModel.disconnect() else viewModel.openConnectScreen()
-                    }) {
-                        Icon(
-                            if (uiState.isConnected) Icons.Default.PowerOff else Icons.Default.Wifi,
-                            contentDescription = if (uiState.isConnected) "Disconnect" else "Reconnect",
-                            tint = c.text2
-                        )
-                    }
+                            .size(7.dp)
+                            .clip(CircleShape)
+                            .background(
+                                when (uiState.connectionStatus) {
+                                    "ready" -> c.green
+                                    "error", "disconnected" -> c.red
+                                    "working" -> c.yellow
+                                    else -> c.muted
+                                }
+                            )
+                    )
+                    Text(
+                        uiState.connectionStatus,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = c.text2
+                    )
+                }
+                // History already handled via navigationIcon — settings + disconnect here
+                IconButton(onClick = { viewModel.toggleSettings() }) {
+                    Icon(Icons.Default.Settings, contentDescription = "Settings", tint = c.text2)
+                }
+                IconButton(onClick = {
+                    if (uiState.isConnected) viewModel.disconnect() else viewModel.openConnectScreen()
+                }) {
+                    Icon(
+                        if (uiState.isConnected) Icons.Default.PowerOff else Icons.Default.Wifi,
+                        contentDescription = if (uiState.isConnected) "Disconnect" else "Reconnect",
+                        tint = if (uiState.isConnected) c.red.copy(alpha = 0.75f) else c.accent
+                    )
                 }
             },
             colors = TopAppBarDefaults.topAppBarColors(
@@ -860,133 +849,209 @@ fun ChatScreen(
         }
 
         // ─── Input area ───────────────────────────────────────────────────────
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(c.surface)
-                .padding(start = 12.dp, end = 8.dp, top = 8.dp, bottom = 4.dp)
+        // Solid surface card separates the input zone from the message list
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            color = c.surface,
+            shadowElevation = 0.dp,
+            border = BorderStroke(0.dp, Color.Transparent)
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                OutlinedTextField(
-                    value = input,
-                    onValueChange = { input = it },
-                    modifier = Modifier.weight(1f).heightIn(min = 44.dp),
-                    enabled = !isOfflineReadOnly,
-                    placeholder = {
-                        Text(
-                            if (isOfflineReadOnly) "Offline cache is read-only" else "Message Cortex… (/ for commands)",
-                            color = c.muted,
-                            style = MaterialTheme.typography.bodyMedium
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .drawBehind {
+                        drawLine(
+                            color = androidx.compose.ui.graphics.Color(0x22ffffff),
+                            start = Offset(0f, 0f),
+                            end = Offset(size.width, 0f),
+                            strokeWidth = 1.dp.toPx()
                         )
-                    },
-                    maxLines = 5,
-                    shape = RoundedCornerShape(12.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = c.accent,
-                        unfocusedBorderColor = c.border,
-                        focusedTextColor = c.text,
-                        unfocusedTextColor = c.text,
-                        cursorColor = c.accent,
-                        focusedContainerColor = c.surface2,
-                        unfocusedContainerColor = c.surface2
-                    ),
-                    textStyle = MaterialTheme.typography.bodyMedium
-                )
-
-                // Send / Stop button
-                if (uiState.activeTurnId != null) {
-                    Button(
-                        onClick = { viewModel.interrupt() },
-                        modifier = Modifier.size(44.dp),
-                        shape = CircleShape,
-                        contentPadding = PaddingValues(0.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = c.redDim,
-                            contentColor = c.red
-                        )
-                    ) {
-                        Icon(Icons.Default.Stop, contentDescription = "Stop", modifier = Modifier.size(20.dp))
                     }
-                } else {
-                    Button(
-                        onClick = { if (viewModel.sendMessage(input)) input = "" },
-                        modifier = Modifier.size(44.dp),
-                        enabled = !isOfflineReadOnly && input.isNotBlank(),
-                        shape = CircleShape,
-                        contentPadding = PaddingValues(0.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = c.accent,
-                            contentColor = c.bg,
-                            disabledContainerColor = c.surface2,
-                            disabledContentColor = c.muted
-                        )
-                    ) {
-                        Icon(Icons.Default.Send, contentDescription = "Send", modifier = Modifier.size(18.dp))
-                    }
-                }
-            }
-
-            // Hint + status bar
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+                    .navigationBarsPadding()
+                    .padding(start = 14.dp, end = 14.dp, top = 12.dp, bottom = 12.dp)
             ) {
-                Text(
-                    if (isOfflineReadOnly) "Reconnect to continue chatting" else "Enter to send · Shift+Enter for new line",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = c.muted,
-                    modifier = Modifier.padding(end = 8.dp)
-                )
-                // Token usage + rate limit bar
+                // ── Text field + action button row ──────────────────────────
                 Row(
+                    modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    uiState.tokenUsage?.let { u ->
-                        Text(
-                            "↑${u.inputTokens} ↓${u.outputTokens}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = c.muted
-                        )
-                    }
-                    uiState.rateLimits.values.firstOrNull()?.let { r ->
-                        val pct = (r.usedPercent / 100.0).coerceIn(0.0, 1.0).toFloat()
-                        if (uiState.tokenUsage != null) {
-                            Box(Modifier.width(1.dp).height(10.dp).background(c.border))
-                        }
-                        // Bar
+                    OutlinedTextField(
+                        value = input,
+                        onValueChange = { input = it },
+                        modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+                        enabled = !isOfflineReadOnly,
+                        placeholder = {
+                            Text(
+                                if (isOfflineReadOnly) "Offline cache is read-only"
+                                else "Message Cortex… (/ for commands)",
+                                color = c.muted,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        },
+                        maxLines = 5,
+                        shape = RoundedCornerShape(12.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = c.accent,
+                            unfocusedBorderColor = c.border,
+                            focusedTextColor = c.text,
+                            unfocusedTextColor = c.text,
+                            cursorColor = c.accent,
+                            focusedContainerColor = c.surface2,
+                            unfocusedContainerColor = c.surface2,
+                            disabledBorderColor = c.border.copy(alpha = 0.4f),
+                            disabledContainerColor = c.surface2.copy(alpha = 0.5f)
+                        ),
+                        textStyle = MaterialTheme.typography.bodyMedium
+                    )
+
+                    // Send / Stop — square-rounded button with solid background
+                    val btnActive = !isOfflineReadOnly && input.isNotBlank()
+                    if (uiState.activeTurnId != null) {
                         Box(
                             modifier = Modifier
-                                .width(56.dp)
-                                .height(4.dp)
-                                .clip(RoundedCornerShape(2.dp))
-                                .background(c.surface2)
+                                .size(48.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(c.redDim)
+                                .border(1.dp, c.red.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
+                                .clickable { viewModel.interrupt() },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                Icons.Default.Stop,
+                                contentDescription = "Stop",
+                                tint = c.red,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .size(48.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(if (btnActive) c.accent else c.surface2)
+                                .border(
+                                    1.dp,
+                                    if (btnActive) c.accent.copy(alpha = 0.4f) else c.border,
+                                    RoundedCornerShape(12.dp)
+                                )
+                                .clickable(enabled = btnActive) {
+                                    if (viewModel.sendMessage(input)) input = ""
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                Icons.Default.Send,
+                                contentDescription = "Send",
+                                tint = if (btnActive) c.bg else c.muted,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+                }
+
+                // ── Usage footer — always visible when connected ─────────────
+                // Left: context % bar. Right: weekly reset time (primary info).
+                if (!isOfflineReadOnly && uiState.isConnected) {
+                    Spacer(Modifier.height(10.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // ── Context bar (left) ──────────────────────────────
+                        val now = System.currentTimeMillis() / 1000.0
+                        // Prefer weekly limit for the bar; fall back to first available
+                        val barLimit = uiState.rateLimits.entries
+                            .firstOrNull { it.key.contains("week", ignoreCase = true) }?.value
+                            ?: uiState.rateLimits.values.firstOrNull()
+                        val pct = barLimit?.usedPercent?.coerceIn(0.0, 100.0)?.toFloat() ?: 0f
+                        val barColor = when {
+                            pct > 85f -> c.red
+                            pct > 65f -> c.yellow
+                            else -> c.accent
+                        }
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             Box(
                                 modifier = Modifier
-                                    .fillMaxHeight()
-                                    .fillMaxWidth(pct)
+                                    .width(56.dp)
+                                    .height(4.dp)
                                     .clip(RoundedCornerShape(2.dp))
-                                    .background(
-                                        when {
-                                            pct > 0.85f -> c.red
-                                            pct > 0.65f -> c.yellow
-                                            else -> c.accent
-                                        }
+                                    .background(c.border)
+                            ) {
+                                if (pct > 0f) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxHeight()
+                                            .fillMaxWidth(pct / 100f)
+                                            .clip(RoundedCornerShape(2.dp))
+                                            .background(barColor)
                                     )
+                                }
+                            }
+                            Text(
+                                if (barLimit != null) "${pct.toInt()}%" else "—",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (barLimit != null) c.text2 else c.muted
                             )
                         }
-                        Text(
-                            "${r.usedPercent.toInt()}%",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = c.muted
-                        )
+
+                        Spacer(Modifier.weight(1f))
+
+                        // ── Weekly / 5h reset info (right, most important) ──
+                        // Priority: weekly > 5h > any other
+                        val weeklyEntry = uiState.rateLimits.entries
+                            .firstOrNull { it.key.contains("week", ignoreCase = true) }
+                        val fiveHEntry = uiState.rateLimits.entries
+                            .firstOrNull { it.key.contains("5", ignoreCase = true) || it.key.contains("hour", ignoreCase = true) }
+                        val primaryEntry = weeklyEntry ?: fiveHEntry ?: uiState.rateLimits.entries.firstOrNull()
+
+                        if (primaryEntry != null) {
+                            val (limitId, info) = primaryEntry
+                            val limitLabel = when {
+                                limitId.contains("week", ignoreCase = true) -> "weekly"
+                                limitId.contains("5") -> "5h"
+                                limitId.contains("hour", ignoreCase = true) -> "1h"
+                                else -> limitId.take(5)
+                            }
+                            val resetStr = info.resetsAt?.let { r ->
+                                if (r > now) {
+                                    val sec = (r - now).toLong()
+                                    when {
+                                        sec >= 86400 -> "${sec / 86400}d ${(sec % 86400) / 3600}h"
+                                        sec >= 3600 -> "${sec / 3600}h ${(sec % 3600) / 60}m"
+                                        sec >= 60 -> "${sec / 60}m"
+                                        else -> "${sec}s"
+                                    }
+                                } else null
+                            }
+                            Text(
+                                if (resetStr != null) "$limitLabel resets $resetStr"
+                                else "$limitLabel resetting",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = c.muted,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        } else {
+                            // No data yet — stable placeholder
+                            Text(
+                                "weekly —",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = c.muted.copy(alpha = 0.4f),
+                                maxLines = 1
+                            )
+                        }
                     }
+                } else if (isOfflineReadOnly) {
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        "Offline — reconnect to continue",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = c.yellow
+                    )
                 }
             }
         }
